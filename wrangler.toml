@@ -6,7 +6,7 @@ compatibility_flags = ["nodejs_compat"]
 # KV namespace for agent registry
 [[kv_namespaces]]
 binding = "AGENT_REGISTRY"
-id = "YOUR_KV_NAMESPACE_ID"
+id = "72d1d8cbfa2d49dba119ab8192d0abd6"
 
 # Secrets (set via wrangler secret put):
 # - ANTHROPIC_API_KEY: Claude API key

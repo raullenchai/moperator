@@ -25,6 +25,62 @@ A headless, serverless email gateway that routes incoming emails to backend AI a
 - **Agent Registry**: Dynamic agent management via KV storage and REST API
 - **Email Parsing**: Full MIME parsing including attachments via postal-mime
 
+## How It Works
+
+```
+Email sent to you@yourdomain.com
+         │
+         ▼
+┌─────────────────────────────────────────────────────────────┐
+│                   Cloudflare Email Routing                  │
+│                 (routes to Moperator Worker)                │
+└─────────────────────────────────────────────────────────────┘
+         │
+         ▼
+┌─────────────────────────────────────────────────────────────┐
+│                     Moperator Worker                        │
+│  1. Parse email (postal-mime)                               │
+│  2. Fetch registered agents from KV                         │
+│  3. Call Claude Haiku API for routing decision              │
+│  4. Dispatch to selected agent's webhook                    │
+└─────────────────────────────────────────────────────────────┘
+         │
+         ▼
+┌─────────────────────────────────────────────────────────────┐
+│                    Claude 3.5 Haiku                         │
+│                                                             │
+│  Prompt: "Here's an email. Here are the available agents:  │
+│           - finance-bot: Handles invoices...                │
+│           - support-bot: Handles customer inquiries...      │
+│           Which agent should handle this?"                  │
+│                                                             │
+│  Response: {"agentId": "finance-bot",                       │
+│             "reason": "Email contains invoice"}             │
+└─────────────────────────────────────────────────────────────┘
+         │
+         ▼
+┌─────────────────────────────────────────────────────────────┐
+│                      Your Agent                             │
+│  - Receives webhook with parsed email                       │
+│  - Verifies HMAC signature                                  │
+│  - Processes email (e.g., analyze with Claude, save, etc.)  │
+└─────────────────────────────────────────────────────────────┘
+```
+
+### Routing Logic
+
+The Moperator Worker calls **Claude 3.5 Haiku** via the Anthropic API to make intelligent routing decisions:
+
+1. Worker receives email and parses it
+2. Fetches all registered agents from Cloudflare KV
+3. Sends prompt to Claude Haiku with:
+   - Email details (from, subject, body preview)
+   - List of agents with their descriptions
+4. Claude returns the best-matching agent ID and reason
+5. Worker dispatches the email to that agent's webhook
+
+This allows routing based on email **content and intent**, not just simple rules.
+
 ## Quick Start
 
 ### Prerequisites
@@ -229,6 +285,12 @@ npm run dev
 
 # Type check
 npx tsc --noEmit
+
+# Run tests
+npm test
+
+# Run tests with coverage
+npm run test:coverage
 ```
 
 ## Project Structure
@@ -241,10 +303,33 @@ moperator/
 │   ├── email-parser.ts # MIME parsing with postal-mime
 │   ├── router.ts       # Claude routing logic
 │   └── dispatcher.ts   # Webhook dispatch with HMAC signing
+├── agent-example/      # Example agent implementation
+│   ├── server.js       # Express server with webhook handler
+│   └── README.md       # Agent setup instructions
 ├── wrangler.toml       # Cloudflare Worker configuration
+├── vitest.config.ts    # Test configuration
 ├── tsconfig.json
 └── package.json
 ```
+
+## Example Agent
+
+The `agent-example/` directory contains a simple agent that:
+- Receives webhooks from Moperator
+- Verifies HMAC signatures
+- Analyzes emails using Claude
+
+To run it:
+
+```bash
+cd agent-example
+npm install
+WEBHOOK_SECRET="your-key" ANTHROPIC_API_KEY="sk-ant-..." npm start
+```
+
+Then expose it publicly with cloudflared or ngrok and register it as an agent.
+
+See [agent-example/README.md](agent-example/README.md) for details.
 
 ## Environment Variables
 
@@ -252,6 +337,22 @@ moperator/
 |----------|-------------|
 | `ANTHROPIC_API_KEY` | Your Anthropic API key for Claude |
 | `WEBHOOK_SIGNING_KEY` | Secret key for HMAC webhook signatures |
+
+### About WEBHOOK_SIGNING_KEY
+
+This secret is used to sign webhook payloads so your agents can verify requests actually came from Moperator (preventing spoofed requests).
+
+**Generate a secure key:**
+```bash
+openssl rand -hex 32
+```
+
+**How it works:**
+1. Moperator signs each payload with HMAC-SHA256 using this key
+2. The signature is sent in the `X-Moperator-Signature` header
+3. Your agent verifies the signature using the same key (see [Verifying Webhook Signatures](#verifying-webhook-signatures))
+
+You must share this key with your agents so they can verify incoming webhooks.
 
 ## License
 

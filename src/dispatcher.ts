@@ -26,6 +26,10 @@ export async function dispatchToAgent(
   };
 
   try {
+    console.log(`[WEBHOOK] POST ${agent.webhookUrl}`);
+    console.log(`[WEBHOOK] Signature: ${signature.slice(0, 16)}...`);
+    console.log(`[WEBHOOK] Payload size: ${JSON.stringify(payload).length} bytes`);
+
     const response = await fetch(agent.webhookUrl, {
       method: "POST",
       headers: {
@@ -36,11 +40,16 @@ export async function dispatchToAgent(
       body: JSON.stringify(payload),
     });
 
+    const responseText = await response.text();
+    console.log(`[WEBHOOK] Response: ${response.status} ${response.statusText}`);
+    console.log(`[WEBHOOK] Response body: ${responseText.slice(0, 200)}`);
+
     return {
       success: response.ok,
       statusCode: response.status,
     };
   } catch (err) {
+    console.error(`[WEBHOOK] Error: ${err instanceof Error ? err.message : "Unknown error"}`);
     return {
       success: false,
       error: err instanceof Error ? err.message : "Unknown error",

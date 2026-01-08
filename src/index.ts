@@ -10,33 +10,46 @@ export default {
     env: Env,
     _ctx: ExecutionContext
   ): Promise<void> {
-    console.log(`Received email from ${message.from} to ${message.to}`);
+    const startTime = Date.now();
+    console.log("=".repeat(60));
+    console.log("[MOPERATOR] EMAIL RECEIVED");
+    console.log("=".repeat(60));
+    console.log(`[EMAIL] From: ${message.from}`);
+    console.log(`[EMAIL] To: ${message.to}`);
+    console.log(`[EMAIL] Headers: ${JSON.stringify(Object.fromEntries(message.headers))}`);
 
     // Parse the email
+    console.log("[PARSE] Parsing email content...");
     const email = await parseEmail(message);
-    console.log(`Parsed: "${email.subject}" with ${email.attachments.length} attachments`);
+    console.log(`[PARSE] Subject: "${email.subject}"`);
+    console.log(`[PARSE] Body preview: "${email.textBody.slice(0, 200)}..."`);
+    console.log(`[PARSE] Attachments: ${email.attachments.length}`);
 
     // Get active agents from registry
+    console.log("[REGISTRY] Fetching active agents...");
     const agents = await getActiveAgents(env.AGENT_REGISTRY);
-    console.log(`Found ${agents.length} active agents`);
+    console.log(`[REGISTRY] Found ${agents.length} active agents: ${agents.map(a => a.id).join(", ")}`);
 
     if (agents.length === 0) {
-      console.error("No agents registered, email will be dropped");
+      console.error("[ERROR] No agents registered, email will be dropped");
       return;
     }
 
     // Route email using Claude
+    console.log("[ROUTER] Calling Claude for routing decision...");
     const decision = await routeEmail(email, agents, env.ANTHROPIC_API_KEY);
-    console.log(`Routed to ${decision.agentId}: ${decision.reason}`);
+    console.log(`[ROUTER] Decision: ${decision.agentId}`);
+    console.log(`[ROUTER] Reason: ${decision.reason}`);
 
     // Find the target agent
     const targetAgent = agents.find((a) => a.id === decision.agentId);
     if (!targetAgent) {
-      console.error(`Agent ${decision.agentId} not found`);
+      console.error(`[ERROR] Agent ${decision.agentId} not found in registry`);
       return;
     }
 
     // Dispatch to agent
+    console.log(`[DISPATCH] Sending to ${targetAgent.name} at ${targetAgent.webhookUrl}`);
     const result = await dispatchToAgent(
       email,
       targetAgent,
@@ -44,11 +57,14 @@ export default {
       env.WEBHOOK_SIGNING_KEY
     );
 
+    const duration = Date.now() - startTime;
     if (result.success) {
-      console.log(`Dispatched to ${targetAgent.name} (${result.statusCode})`);
+      console.log(`[DISPATCH] SUCCESS - Status: ${result.statusCode}`);
+      console.log(`[COMPLETE] Email processed in ${duration}ms`);
     } else {
-      console.error(`Dispatch failed: ${result.error || result.statusCode}`);
+      console.error(`[DISPATCH] FAILED - ${result.error || `Status: ${result.statusCode}`}`);
     }
+    console.log("=".repeat(60));
   },
 
   // HTTP API for managing agents
