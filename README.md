@@ -87,7 +87,25 @@ npm run deploy
 2. Add your domain if not already configured
 3. Create a route: `*@yourdomain.com` → Worker → `moperator`
 
-## Usage
+## API Reference
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| `GET` | `/health` | Health check |
+| `GET` | `/agents` | List all registered agents |
+| `POST` | `/agents` | Register a new agent |
+| `DELETE` | `/agents/:id` | Delete an agent |
+| `POST` | `/test-route` | Test email routing (dev/debug) |
+
+### Health Check
+
+```bash
+curl https://moperator.your-subdomain.workers.dev/health
+```
+
+```json
+{ "status": "ok", "service": "moperator" }
+```
 
 ### Register an Agent
 
@@ -112,6 +130,41 @@ curl https://moperator.your-subdomain.workers.dev/agents
 
 ```bash
 curl -X DELETE https://moperator.your-subdomain.workers.dev/agents/finance-bot
+```
+
+### Test Routing
+
+Simulate email routing without sending an actual email. Useful for testing and debugging.
+
+```bash
+curl -X POST https://moperator.your-subdomain.workers.dev/test-route \
+  -H "Content-Type: application/json" \
+  -d '{
+    "from": "vendor@company.com",
+    "subject": "Invoice #1234",
+    "body": "Please find attached the invoice for Q4 services."
+  }'
+```
+
+```json
+{
+  "email": {
+    "from": "vendor@company.com",
+    "to": "inbox@moperator.ai",
+    "subject": "Invoice #1234",
+    "textBody": "Please find attached the invoice for Q4 services.",
+    "attachments": [],
+    "receivedAt": "2024-01-15T10:30:00.000Z"
+  },
+  "routing": {
+    "agentId": "finance-bot",
+    "reason": "Email contains an invoice for financial services"
+  },
+  "availableAgents": [
+    { "id": "finance-bot", "name": "FinanceBot" },
+    { "id": "support-bot", "name": "SupportBot" }
+  ]
+}
 ```
 
 ## Webhook Payload

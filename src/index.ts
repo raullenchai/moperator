@@ -97,6 +97,37 @@ export default {
       return json({ deleted: agentId });
     }
 
+    // Test routing (simulates email routing without actual email)
+    if (url.pathname === "/test-route" && request.method === "POST") {
+      const body = (await request.json()) as {
+        from?: string;
+        subject?: string;
+        body?: string;
+      };
+
+      const simulatedEmail = {
+        from: body.from || "test@example.com",
+        to: "inbox@moperator.ai",
+        subject: body.subject || "Test email",
+        textBody: body.body || "",
+        attachments: [],
+        receivedAt: new Date().toISOString(),
+      };
+
+      const agents = await getActiveAgents(env.AGENT_REGISTRY);
+      if (agents.length === 0) {
+        return json({ error: "No agents registered" }, 400);
+      }
+
+      const decision = await routeEmail(simulatedEmail, agents, env.ANTHROPIC_API_KEY);
+
+      return json({
+        email: simulatedEmail,
+        routing: decision,
+        availableAgents: agents.map((a) => ({ id: a.id, name: a.name })),
+      });
+    }
+
     return json({ error: "Not found" }, 404);
   },
 };
