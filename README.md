@@ -31,7 +31,6 @@ A headless, serverless email gateway that routes incoming emails to backend AI a
 
 - [Node.js](https://nodejs.org/) 18+
 - [Cloudflare account](https://dash.cloudflare.com/sign-up)
-- [Wrangler CLI](https://developers.cloudflare.com/workers/wrangler/install-and-update/)
 - [Anthropic API key](https://console.anthropic.com/)
 
 ### Installation
@@ -47,13 +46,21 @@ npm install
 
 ### Configuration
 
-1. **Create a KV namespace:**
+Wrangler CLI is included as a dev dependency. Use `npx wrangler` to run commands.
+
+1. **Login to Cloudflare:**
 
 ```bash
-wrangler kv namespace create AGENT_REGISTRY
+npx wrangler login
 ```
 
-2. **Update `wrangler.toml`** with the returned namespace ID:
+2. **Create a KV namespace:**
+
+```bash
+npx wrangler kv namespace create AGENT_REGISTRY
+```
+
+3. **Update `wrangler.toml`** with the returned namespace ID:
 
 ```toml
 [[kv_namespaces]]
@@ -61,11 +68,11 @@ binding = "AGENT_REGISTRY"
 id = "your-namespace-id-here"
 ```
 
-3. **Set secrets:**
+4. **Set secrets:**
 
 ```bash
-wrangler secret put ANTHROPIC_API_KEY
-wrangler secret put WEBHOOK_SIGNING_KEY
+npx wrangler secret put ANTHROPIC_API_KEY
+npx wrangler secret put WEBHOOK_SIGNING_KEY
 ```
 
 ### Deployment
