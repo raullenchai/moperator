@@ -8,6 +8,8 @@ export async function routeEmail(
   agents: Agent[],
   apiKey: string
 ): Promise<RoutingDecision> {
+  const startTime = Date.now();
+
   if (agents.length === 0) {
     return { agentId: "unrouted", reason: "No agents available" };
   }
@@ -27,10 +29,12 @@ export async function routeEmail(
     },
     body: JSON.stringify({
       model: CLAUDE_MODEL,
-      max_tokens: 256,
+      max_tokens: 100,  // Reduced from 256 - we only need short JSON
       messages: [{ role: "user", content: prompt }],
     }),
   });
+
+  console.log(`[ROUTER] Claude API took ${Date.now() - startTime}ms`);
 
   if (!response.ok) {
     console.error("Claude API error:", await response.text());
@@ -45,21 +49,18 @@ export async function routeEmail(
 
 export function buildRoutingPrompt(email: ParsedEmail, agents: Agent[]): string {
   const agentList = agents
-    .map((a) => `- ${a.id}: ${a.name} - ${a.description}`)
+    .map((a) => `- ${a.id}: ${a.description.slice(0, 100)}`)
     .join("\n");
 
-  return `You are an email routing system. Analyze this email and decide which agent should handle it.
+  // Shorter prompt for faster response
+  return `Route this email to the best agent. Reply with JSON only: {"agentId":"id","reason":"why"}
 
-EMAIL:
 From: ${email.from}
 Subject: ${email.subject}
-Body: ${email.textBody.slice(0, 1000)}
+Body: ${email.textBody.slice(0, 500)}
 
-AVAILABLE AGENTS:
-${agentList}
-
-Respond with ONLY a JSON object in this exact format, no other text:
-{"agentId": "the_agent_id", "reason": "brief explanation"}`;
+Agents:
+${agentList}`;
 }
 
 export function parseRoutingResponse(text: string, agents: Agent[]): RoutingDecision {

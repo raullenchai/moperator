@@ -69,58 +69,79 @@ export default {
     const agents = await getTenantAgents(env.AGENT_REGISTRY, tenant.id);
     console.log(`[REGISTRY] Found ${agents.length} active agents: ${agents.map(a => a.id).join(", ")}`);
 
+    // Route email using Claude (or default if no/one agent)
+    let decision;
+    let targetAgent = null;
+
     if (agents.length === 0) {
-      console.error("[ERROR] No agents registered for tenant, email will be dropped");
-      return;
+      // No agents - still store email for MCP/Action access
+      console.log("[ROUTER] No agents registered, storing for MCP/Action access");
+      decision = { agentId: "none", reason: "No agents registered - stored for API access" };
+    } else {
+      console.log("[ROUTER] Calling Claude for routing decision...");
+      decision = await routeEmail(email, agents, env.ANTHROPIC_API_KEY);
+      console.log(`[ROUTER] Decision: ${decision.agentId}`);
+      console.log(`[ROUTER] Reason: ${decision.reason}`);
+      targetAgent = agents.find((a) => a.id === decision.agentId) || null;
     }
 
-    // Route email using Claude
-    console.log("[ROUTER] Calling Claude for routing decision...");
-    const decision = await routeEmail(email, agents, env.ANTHROPIC_API_KEY);
-    console.log(`[ROUTER] Decision: ${decision.agentId}`);
-    console.log(`[ROUTER] Reason: ${decision.reason}`);
+    const routingDuration = Date.now() - startTime;
+    console.log(`[ROUTER] Routing completed in ${routingDuration}ms`);
 
-    // Find the target agent
-    const targetAgent = agents.find((a) => a.id === decision.agentId);
-    if (!targetAgent) {
-      console.error(`[ERROR] Agent ${decision.agentId} not found in registry`);
-      return;
-    }
-
-    // Dispatch to agent
-    console.log(`[DISPATCH] Sending to ${targetAgent.name} at ${targetAgent.webhookUrl}`);
-    const result = await dispatchToAgent(
+    // STEP 1: Save to KV immediately (so MCP/Action users can access right away)
+    // Webhook dispatch result will be updated after dispatch completes
+    const pendingResult = { success: false, statusCode: 0, error: "Pending webhook dispatch" };
+    const emailId = await saveTenantEmailRecord(
+      env.EMAIL_HISTORY,
+      tenant.id,
       email,
-      targetAgent,
-      decision.reason,
-      env.WEBHOOK_SIGNING_KEY
+      decision,
+      targetAgent ? pendingResult : { success: true, statusCode: 200 }, // No webhook = success
+      routingDuration
     );
-
-    const duration = Date.now() - startTime;
-
-    // Save to tenant-scoped email history
-    await saveTenantEmailRecord(env.EMAIL_HISTORY, tenant.id, email, decision, result, duration);
+    console.log(`[STORE] Email saved to KV: ${emailId}`);
 
     // Update usage stats
     await incrementUsage(env.TENANTS, tenant.id, "emailsToday");
     await incrementUsage(env.TENANTS, tenant.id, "emailsTotal");
 
-    if (result.success) {
-      console.log(`[DISPATCH] SUCCESS - Status: ${result.statusCode}`);
-      console.log(`[COMPLETE] Email processed in ${duration}ms`);
-    } else {
-      console.error(`[DISPATCH] FAILED - ${result.error || `Status: ${result.statusCode}`}`);
-
-      // Add to tenant-scoped retry queue
-      await addToRetryQueue(
-        env.RETRY_QUEUE,
+    // STEP 2: Dispatch to webhook (only if agent has a valid webhook URL)
+    if (targetAgent && isValidWebhookUrl(targetAgent.webhookUrl)) {
+      console.log(`[DISPATCH] Sending to ${targetAgent.name} at ${targetAgent.webhookUrl}`);
+      const result = await dispatchToAgent(
         email,
-        targetAgent.id,
-        targetAgent.webhookUrl,
+        targetAgent,
         decision.reason,
-        result.error || `Status: ${result.statusCode}`,
-        tenant.id // Tenant scoping
+        env.WEBHOOK_SIGNING_KEY
       );
+
+      const totalDuration = Date.now() - startTime;
+
+      // Update the stored record with dispatch result
+      await updateEmailDispatchResult(env.EMAIL_HISTORY, tenant.id, emailId, result, totalDuration);
+
+      if (result.success) {
+        console.log(`[DISPATCH] SUCCESS - Status: ${result.statusCode}`);
+      } else {
+        console.error(`[DISPATCH] FAILED - ${result.error || `Status: ${result.statusCode}`}`);
+
+        // Add to tenant-scoped retry queue
+        await addToRetryQueue(
+          env.RETRY_QUEUE,
+          email,
+          targetAgent.id,
+          targetAgent.webhookUrl,
+          decision.reason,
+          result.error || `Status: ${result.statusCode}`,
+          tenant.id
+        );
+      }
+      console.log(`[COMPLETE] Email processed in ${totalDuration}ms`);
+    } else {
+      // No webhook dispatch needed
+      const reason = !targetAgent ? "No agent matched" : "No valid webhook URL configured";
+      console.log(`[SKIP] Webhook dispatch skipped: ${reason}`);
+      console.log(`[COMPLETE] Email stored in ${routingDuration}ms (no webhook)`);
     }
     console.log("=".repeat(60));
   },
@@ -180,6 +201,57 @@ export default {
     // OpenAPI spec for ChatGPT Custom GPT Actions
     if (url.pathname === "/openapi.json" || url.pathname === "/openapi.yaml") {
       return handleOpenAPIRequest(request);
+    }
+
+    // Privacy policy for ChatGPT Actions
+    if (url.pathname === "/privacy") {
+      return new Response(`<!DOCTYPE html>
+<html>
+<head>
+  <title>Moperator Privacy Policy</title>
+  <style>
+    body { font-family: system-ui, sans-serif; max-width: 800px; margin: 40px auto; padding: 20px; line-height: 1.6; }
+    h1 { color: #333; }
+    h2 { color: #555; margin-top: 30px; }
+  </style>
+</head>
+<body>
+  <h1>Moperator Privacy Policy</h1>
+  <p><em>Last updated: January 2025</em></p>
+
+  <h2>Overview</h2>
+  <p>Moperator ("Email for AI") is an email infrastructure service for AI agents. This policy describes how we handle data when you use our service.</p>
+
+  <h2>Data We Process</h2>
+  <ul>
+    <li><strong>Email Data:</strong> We receive and process emails sent to your Moperator address to route them to your configured AI agents.</li>
+    <li><strong>API Usage:</strong> We log API requests for security and debugging purposes.</li>
+    <li><strong>Account Info:</strong> Email address and API keys for authentication.</li>
+  </ul>
+
+  <h2>How We Use Data</h2>
+  <ul>
+    <li>Route incoming emails to your configured webhook endpoints</li>
+    <li>Provide email history and search functionality via API</li>
+    <li>Authenticate API requests</li>
+  </ul>
+
+  <h2>Data Retention</h2>
+  <p>Email records are retained for 30 days. You can delete your account and associated data at any time.</p>
+
+  <h2>Third Parties</h2>
+  <p>We use Cloudflare for hosting and Anthropic Claude for email routing decisions. Emails are sent to webhook URLs you configure.</p>
+
+  <h2>Contact</h2>
+  <p>For privacy inquiries, contact the service administrator.</p>
+</body>
+</html>`, {
+        status: 200,
+        headers: {
+          "Content-Type": "text/html",
+          "Access-Control-Allow-Origin": "*",
+        },
+      });
     }
 
     // A2A Agent Card (discovery endpoint)
@@ -318,7 +390,7 @@ export default {
 
     // ================== PROTOCOL ENDPOINTS ==================
 
-    // MCP endpoint for Claude Desktop
+    // MCP endpoint for Claude Desktop (POST JSON-RPC)
     if (url.pathname === "/mcp" && request.method === "POST") {
       if (!tenant.settings.enabledProtocols.includes("mcp")) {
         return json({ error: "MCP protocol not enabled for this tenant" }, 403);
@@ -730,7 +802,7 @@ async function saveTenantEmailRecord(
   decision: any,
   result: any,
   duration: number
-): Promise<void> {
+): Promise<string> {
   const id = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
   const record = {
     id,
@@ -752,6 +824,40 @@ async function saveTenantEmailRecord(
   index.unshift(id);
   if (index.length > 1000) index.pop();
   await kv.put(indexKey, JSON.stringify(index));
+
+  return id;
+}
+
+async function updateEmailDispatchResult(
+  kv: KVNamespace,
+  tenantId: string,
+  emailId: string,
+  result: any,
+  totalDuration: number
+): Promise<void> {
+  const key = tenantKey(tenantId, "email", emailId);
+  const data = await kv.get(key);
+  if (data) {
+    const record = JSON.parse(data);
+    record.dispatchResult = result;
+    record.processingTimeMs = totalDuration;
+    await kv.put(key, JSON.stringify(record));
+  }
+}
+
+// Check if webhook URL is valid (not a placeholder)
+function isValidWebhookUrl(url: string): boolean {
+  if (!url) return false;
+  // Skip placeholder URLs
+  if (url.includes("your-webhook") || url.includes("example.com") || url.includes("placeholder")) {
+    return false;
+  }
+  try {
+    const parsed = new URL(url);
+    return parsed.protocol === "https:" || parsed.protocol === "http:";
+  } catch {
+    return false;
+  }
 }
 
 async function getTenantEmails(

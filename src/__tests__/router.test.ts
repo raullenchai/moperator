@@ -107,8 +107,9 @@ describe("router", () => {
     it("includes all agents in prompt", () => {
       const prompt = buildRoutingPrompt(mockEmail, mockAgents);
 
-      expect(prompt).toContain("finance-bot: FinanceBot");
-      expect(prompt).toContain("support-bot: SupportBot");
+      // New format uses agent id: description (without name for speed)
+      expect(prompt).toContain("finance-bot: Handles invoices and financial documents");
+      expect(prompt).toContain("support-bot: Handles customer support inquiries");
     });
 
     it("truncates long email bodies", () => {
@@ -118,8 +119,9 @@ describe("router", () => {
       };
       const prompt = buildRoutingPrompt(longEmail, mockAgents);
 
-      expect(prompt).toContain("x".repeat(1000));
-      expect(prompt).not.toContain("x".repeat(1001));
+      // Body is truncated to 500 chars for faster routing
+      expect(prompt).toContain("x".repeat(500));
+      expect(prompt).not.toContain("x".repeat(501));
     });
   });
 

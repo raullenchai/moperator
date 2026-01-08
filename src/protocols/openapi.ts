@@ -19,7 +19,7 @@ export interface OpenAPISpec {
 
 export function generateOpenAPISpec(baseUrl: string): OpenAPISpec {
   return {
-    openapi: "3.0.0",
+    openapi: "3.1.0",
     info: {
       title: "Moperator Email API",
       description: "Email for AI — the inbox for your AI agents. Query emails, search by sender or subject, and manage routing agents. Built for LLMs, autonomous systems, and non-human intelligence.",

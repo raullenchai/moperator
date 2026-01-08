@@ -513,7 +513,7 @@ async function getStats(
   };
 }
 
-// ==================== HTTP Handler ====================
+// ==================== HTTP Handler (POST for JSON-RPC) ====================
 
 export async function handleMCPHttp(
   request: Request,
@@ -562,3 +562,4 @@ export async function handleMCPHttp(
     );
   }
 }
+

@@ -10,15 +10,15 @@ The first email infrastructure built for AI agents, LLMs, and autonomous systems
 
 ```
 ┌─────────────┐     ┌─────────────┐     ┌─────────────┐     ┌─────────────┐
-│   Inbound   │────▶│  Cloudflare │────▶│   Claude    │────▶│   Agent     │
-│    Email    │     │   Worker    │     │   Haiku     │     │   Webhook   │
+│   Inbound   │────▶│  Cloudflare │────▶│   Claude    │────▶│  KV Store   │
+│    Email    │     │   Worker    │     │   Haiku     │     │  (instant)  │
 └─────────────┘     └─────────────┘     └─────────────┘     └─────────────┘
-                           │                   │
-                           ▼                   ▼
-                    ┌─────────────┐     ┌─────────────┐
-                    │ postal-mime │     │  KV Agent   │
-                    │   Parser    │     │  Registry   │
-                    └─────────────┘     └─────────────┘
+                           │                   │                   │
+                           ▼                   ▼                   ▼
+                    ┌─────────────┐     ┌─────────────┐     ┌─────────────┐
+                    │ postal-mime │     │  KV Agent   │     │   Webhook   │
+                    │   Parser    │     │  Registry   │     │  (optional) │
+                    └─────────────┘     └─────────────┘     └─────────────┘
 ```
 
 ## Features
@@ -46,29 +46,19 @@ Email sent to you@yourdomain.com
 │  1. Parse email (postal-mime)                               │
 │  2. Fetch registered agents from KV                         │
 │  3. Call Claude Haiku API for routing decision              │
-│  4. Dispatch to selected agent's webhook                    │
+│  4. Store email in KV (immediately accessible via API)      │
+│  5. Dispatch to webhook (optional, if configured)           │
 └─────────────────────────────────────────────────────────────┘
          │
-         ▼
-┌─────────────────────────────────────────────────────────────┐
-│                    Claude 3.5 Haiku                         │
-│                                                             │
-│  Prompt: "Here's an email. Here are the available agents:  │
-│           - finance-bot: Handles invoices...                │
-│           - support-bot: Handles customer inquiries...      │
-│           Which agent should handle this?"                  │
-│                                                             │
-│  Response: {"agentId": "finance-bot",                       │
-│             "reason": "Email contains invoice"}             │
-└─────────────────────────────────────────────────────────────┘
-         │
-         ▼
-┌─────────────────────────────────────────────────────────────┐
-│                      Your Agent                             │
-│  - Receives webhook with parsed email                       │
-│  - Verifies HMAC signature                                  │
-│  - Processes email (e.g., analyze with Claude, save, etc.)  │
-└─────────────────────────────────────────────────────────────┘
+         ├──────────────────────────────────────┐
+         ▼                                      ▼
+┌─────────────────────────────┐    ┌─────────────────────────────┐
+│      KV Storage             │    │    Webhook (Optional)       │
+│  Instant API access via:    │    │  For real-time push to:     │
+│  - MCP (Claude Desktop)     │    │  - Custom bots              │
+│  - OpenAPI (ChatGPT)        │    │  - Slack/Discord            │
+│  - REST API                 │    │  - Your backend services    │
+└─────────────────────────────┘    └─────────────────────────────┘
 ```
 
 ### Routing Logic
