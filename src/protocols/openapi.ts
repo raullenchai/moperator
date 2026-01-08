@@ -1,13 +1,15 @@
-// OpenAPI Spec Generator for ChatGPT Custom GPT Actions
-// Generates OpenAPI 3.0 spec dynamically
+/**
+ * OpenAPI Spec Generator for ChatGPT Custom GPT Actions
+ * Generates OpenAPI 3.1.0 spec dynamically based on server URL
+ *
+ * Usage: Import schema from /openapi.json endpoint in ChatGPT Actions
+ */
+
+// ==================== Types ====================
 
 export interface OpenAPISpec {
   openapi: string;
-  info: {
-    title: string;
-    description: string;
-    version: string;
-  };
+  info: { title: string; description: string; version: string };
   servers: Array<{ url: string; description?: string }>;
   paths: Record<string, Record<string, unknown>>;
   components: {
@@ -17,33 +19,32 @@ export interface OpenAPISpec {
   security: Array<Record<string, string[]>>;
 }
 
+// ==================== Spec Generator ====================
+
 export function generateOpenAPISpec(baseUrl: string): OpenAPISpec {
   return {
     openapi: "3.1.0",
     info: {
       title: "Moperator Email API",
-      description: "Email for AI — the inbox for your AI agents. Query emails, search by sender or subject, and manage routing agents. Built for LLMs, autonomous systems, and non-human intelligence.",
+      description:
+        "Email for AI — the inbox for your AI agents. Query emails, search by sender or subject, and manage routing agents. Built for LLMs, autonomous systems, and non-human intelligence.",
       version: "1.0.0",
     },
-    servers: [
-      {
-        url: baseUrl,
-        description: "Moperator API Server",
-      },
-    ],
+    servers: [{ url: baseUrl, description: "Moperator API Server" }],
     paths: {
       "/api/v1/emails": {
         get: {
           operationId: "listEmails",
           summary: "List recent emails",
-          description: "Get a list of recent emails with pagination support. Returns email summaries including sender, subject, and routing information.",
+          description:
+            "Get a list of recent emails. IMPORTANT: Always display ALL emails returned in the response as a numbered list showing From, Subject, and Preview for each email. Do not summarize or show only one email.",
           parameters: [
             {
               name: "limit",
               in: "query",
-              description: "Maximum number of emails to return (default: 20, max: 100)",
+              description: "Maximum number of emails to return (default: 10, max: 50)",
               required: false,
-              schema: { type: "integer", default: 20, maximum: 100 },
+              schema: { type: "integer", default: 10, maximum: 50 },
             },
             {
               name: "offset",
@@ -56,11 +57,7 @@ export function generateOpenAPISpec(baseUrl: string): OpenAPISpec {
           responses: {
             "200": {
               description: "List of emails",
-              content: {
-                "application/json": {
-                  schema: { $ref: "#/components/schemas/EmailListResponse" },
-                },
-              },
+              content: { "application/json": { schema: { $ref: "#/components/schemas/EmailListResponse" } } },
             },
           },
         },
@@ -69,7 +66,7 @@ export function generateOpenAPISpec(baseUrl: string): OpenAPISpec {
         get: {
           operationId: "searchEmails",
           summary: "Search emails",
-          description: "Search emails by sender address, subject line, or routing agent. All filters use partial matching.",
+          description: "Search emails by sender address or subject line. All filters use partial matching.",
           parameters: [
             {
               name: "from",
@@ -85,22 +82,11 @@ export function generateOpenAPISpec(baseUrl: string): OpenAPISpec {
               required: false,
               schema: { type: "string" },
             },
-            {
-              name: "agentId",
-              in: "query",
-              description: "Filter by the ID of the agent that handled the email",
-              required: false,
-              schema: { type: "string" },
-            },
           ],
           responses: {
             "200": {
               description: "Search results",
-              content: {
-                "application/json": {
-                  schema: { $ref: "#/components/schemas/EmailSearchResponse" },
-                },
-              },
+              content: { "application/json": { schema: { $ref: "#/components/schemas/EmailSearchResponse" } } },
             },
           },
         },
@@ -109,7 +95,7 @@ export function generateOpenAPISpec(baseUrl: string): OpenAPISpec {
         get: {
           operationId: "getEmail",
           summary: "Get email details",
-          description: "Get full details of a specific email by ID, including the complete body and any attachments.",
+          description: "Get full details of a specific email by ID, including the complete body.",
           parameters: [
             {
               name: "emailId",
@@ -122,15 +108,9 @@ export function generateOpenAPISpec(baseUrl: string): OpenAPISpec {
           responses: {
             "200": {
               description: "Email details",
-              content: {
-                "application/json": {
-                  schema: { $ref: "#/components/schemas/EmailRecord" },
-                },
-              },
+              content: { "application/json": { schema: { $ref: "#/components/schemas/EmailRecord" } } },
             },
-            "404": {
-              description: "Email not found",
-            },
+            "404": { description: "Email not found" },
           },
         },
       },
@@ -142,28 +122,7 @@ export function generateOpenAPISpec(baseUrl: string): OpenAPISpec {
           responses: {
             "200": {
               description: "Email statistics",
-              content: {
-                "application/json": {
-                  schema: { $ref: "#/components/schemas/EmailStats" },
-                },
-              },
-            },
-          },
-        },
-      },
-      "/api/v1/agents": {
-        get: {
-          operationId: "listAgents",
-          summary: "List routing agents",
-          description: "Get a list of all registered email routing agents and their current health status.",
-          responses: {
-            "200": {
-              description: "List of agents",
-              content: {
-                "application/json": {
-                  schema: { $ref: "#/components/schemas/AgentListResponse" },
-                },
-              },
+              content: { "application/json": { schema: { $ref: "#/components/schemas/EmailStats" } } },
             },
           },
         },
@@ -180,12 +139,14 @@ export function generateOpenAPISpec(baseUrl: string): OpenAPISpec {
       schemas: {
         EmailListResponse: {
           type: "object",
+          description: "List of emails. Display ALL emails in a numbered list format.",
           properties: {
             emails: {
               type: "array",
+              description: "Array of emails - display each one as a list item with From, Subject, Preview",
               items: { $ref: "#/components/schemas/EmailSummary" },
             },
-            total: { type: "integer", description: "Total number of emails" },
+            total: { type: "integer", description: "Total number of emails in inbox" },
             limit: { type: "integer" },
             offset: { type: "integer" },
           },
@@ -193,10 +154,7 @@ export function generateOpenAPISpec(baseUrl: string): OpenAPISpec {
         EmailSearchResponse: {
           type: "object",
           properties: {
-            emails: {
-              type: "array",
-              items: { $ref: "#/components/schemas/EmailSummary" },
-            },
+            emails: { type: "array", items: { $ref: "#/components/schemas/EmailSummary" } },
             count: { type: "integer", description: "Number of matching emails" },
           },
         },
@@ -206,6 +164,7 @@ export function generateOpenAPISpec(baseUrl: string): OpenAPISpec {
             id: { type: "string" },
             from: { type: "string", description: "Sender email address" },
             subject: { type: "string" },
+            preview: { type: "string", description: "First 200 chars of email body" },
             receivedAt: { type: "string", format: "date-time" },
             agentId: { type: "string", description: "ID of agent that handled this email" },
             success: { type: "boolean", description: "Whether processing succeeded" },
@@ -253,32 +212,6 @@ export function generateOpenAPISpec(baseUrl: string): OpenAPISpec {
             avgProcessingTimeMs: { type: "integer", description: "Average processing time in milliseconds" },
           },
         },
-        AgentListResponse: {
-          type: "object",
-          properties: {
-            agents: {
-              type: "array",
-              items: { $ref: "#/components/schemas/Agent" },
-            },
-          },
-        },
-        Agent: {
-          type: "object",
-          properties: {
-            id: { type: "string" },
-            name: { type: "string" },
-            description: { type: "string" },
-            active: { type: "boolean" },
-            health: {
-              type: "object",
-              properties: {
-                healthy: { type: "boolean" },
-                lastCheck: { type: "string", format: "date-time" },
-                consecutiveFailures: { type: "integer" },
-              },
-            },
-          },
-        },
       },
     },
     security: [{ bearerAuth: [] }],
@@ -290,7 +223,6 @@ export function generateOpenAPISpec(baseUrl: string): OpenAPISpec {
 export function handleOpenAPIRequest(request: Request): Response {
   const url = new URL(request.url);
   const baseUrl = `${url.protocol}//${url.host}`;
-
   const spec = generateOpenAPISpec(baseUrl);
 
   // Check if YAML format is requested
@@ -298,43 +230,31 @@ export function handleOpenAPIRequest(request: Request): Response {
   const formatParam = url.searchParams.get("format");
 
   if (formatParam === "yaml" || acceptHeader.includes("yaml")) {
-    // Simple YAML conversion (for full YAML support, use a library)
     return new Response(jsonToYaml(spec), {
       status: 200,
-      headers: {
-        "Content-Type": "text/yaml",
-        "Access-Control-Allow-Origin": "*",
-      },
+      headers: { "Content-Type": "text/yaml", "Access-Control-Allow-Origin": "*" },
     });
   }
 
   return new Response(JSON.stringify(spec, null, 2), {
     status: 200,
-    headers: {
-      "Content-Type": "application/json",
-      "Access-Control-Allow-Origin": "*",
-    },
+    headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" },
   });
 }
 
-// Simple JSON to YAML converter (basic, for display purposes)
+// ==================== YAML Converter ====================
+
 function jsonToYaml(obj: unknown, indent: number = 0): string {
   const spaces = "  ".repeat(indent);
 
-  if (obj === null || obj === undefined) {
-    return "null";
-  }
-
+  if (obj === null || obj === undefined) return "null";
   if (typeof obj === "string") {
     if (obj.includes("\n") || obj.includes(":") || obj.includes("#")) {
       return `"${obj.replace(/"/g, '\\"')}"`;
     }
     return obj;
   }
-
-  if (typeof obj === "number" || typeof obj === "boolean") {
-    return String(obj);
-  }
+  if (typeof obj === "number" || typeof obj === "boolean") return String(obj);
 
   if (Array.isArray(obj)) {
     if (obj.length === 0) return "[]";
@@ -355,10 +275,7 @@ function jsonToYaml(obj: unknown, indent: number = 0): string {
     return entries
       .map(([key, value]) => {
         const yamlValue = jsonToYaml(value, indent + 1);
-        if (typeof value === "object" && value !== null && !Array.isArray(value)) {
-          return `${spaces}${key}:\n${yamlValue}`;
-        }
-        if (Array.isArray(value)) {
+        if (typeof value === "object" && value !== null) {
           return `${spaces}${key}:\n${yamlValue}`;
         }
         return `${spaces}${key}: ${yamlValue}`;
