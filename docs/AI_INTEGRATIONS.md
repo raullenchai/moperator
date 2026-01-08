@@ -1,9 +1,10 @@
 # AI Integrations
 
-Moperator supports integration with AI assistants through two protocols:
+Moperator supports integration with AI assistants through three protocols:
 
 - **OpenAPI** - For ChatGPT Custom GPTs (Actions)
 - **MCP** - For Claude Desktop (Model Context Protocol)
+- **A2A** - For Gemini and other A2A-compatible agents (Agent-to-Agent Protocol)
 
 ## ChatGPT Integration (OpenAPI)
 
@@ -191,14 +192,89 @@ Claude Desktop can access your Moperator inbox through the Model Context Protoco
 
 ---
 
+## Gemini Integration (A2A)
+
+Gemini and other A2A-compatible agents can access Moperator through the Agent-to-Agent (A2A) protocol.
+
+### Discovery Endpoints
+
+Moperator exposes a standard A2A Agent Card for discovery:
+
+```bash
+# Agent Card (describes capabilities)
+curl https://moperator.raullenchai.workers.dev/.well-known/agent.json
+
+# Capabilities list
+curl https://moperator.raullenchai.workers.dev/a2a/capabilities
+```
+
+### Executing Tasks
+
+Send tasks to the A2A endpoint with your API key:
+
+```bash
+curl -X POST https://moperator.raullenchai.workers.dev/a2a/tasks \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer YOUR_API_KEY" \
+  -d '{
+    "capability": "check_inbox",
+    "input": { "limit": 10 }
+  }'
+```
+
+### Available Capabilities
+
+| Capability | Description | Input |
+|------------|-------------|-------|
+| `check_inbox` | List recent emails | `{ limit?: number }` |
+| `read_email` | Read full email content | `{ email_id: string }` |
+| `search_emails` | Search by sender/subject | `{ from?: string, subject?: string }` |
+| `email_stats` | Get inbox statistics | `{}` |
+
+### Response Format
+
+A2A tasks return a structured response:
+
+```json
+{
+  "task": {
+    "id": "task_1234567890_abc123",
+    "capability": "check_inbox",
+    "input": { "limit": 10 },
+    "status": "completed",
+    "output": {
+      "emails": [...],
+      "total": 5
+    },
+    "createdAt": "2026-01-08T12:00:00.000Z",
+    "completedAt": "2026-01-08T12:00:00.500Z"
+  }
+}
+```
+
+### Using with Gemini
+
+When Gemini supports A2A protocol discovery, point it to your Moperator deployment:
+
+1. Provide the Agent Card URL: `https://your-deployment.workers.dev/.well-known/agent.json`
+2. Gemini will discover available capabilities
+3. Authenticate with your API key
+4. Gemini can then execute tasks like `check_inbox`, `read_email`, etc.
+
+### A2A Protocol Spec
+
+For more details on the A2A protocol, see: https://google.github.io/A2A/
+
+---
+
 ## Protocol Comparison
 
-| Feature | ChatGPT (OpenAPI) | Claude Desktop (MCP) |
-|---------|-------------------|----------------------|
-| Setup | Import URL in Actions | Local bridge script |
-| Auth | Bearer token in GPT config | API key in bridge script |
-| Format | REST API with JSON | JSON-RPC over stdio |
-| Response | Structured JSON | Human-readable text |
-| Best for | GPT Actions, web UI | Desktop app, local use |
+| Feature | ChatGPT (OpenAPI) | Claude Desktop (MCP) | Gemini (A2A) |
+|---------|-------------------|----------------------|--------------|
+| Setup | Import URL in Actions | Local bridge script | Agent Card URL |
+| Auth | Bearer token in GPT config | API key in bridge script | Bearer token in headers |
+| Format | REST API with JSON | JSON-RPC over stdio | REST with task objects |
+| Response | Structured JSON | Human-readable text | Task with output |
+| Best for | GPT Actions, web UI | Desktop app, local use | Agent-to-agent comms |
 
-Both protocols provide the same core functionality - listing, reading, and searching emails.
+All three protocols provide the same core functionality - listing, reading, and searching emails.

@@ -1,14 +1,21 @@
-// A2A (Agent-to-Agent) Protocol Implementation
-// For Gemini and other A2A-compatible agents
-// Spec: https://google.github.io/A2A/
+/**
+ * A2A (Agent-to-Agent) Protocol Implementation
+ * For Gemini and other A2A-compatible agents
+ * Spec: https://google.github.io/A2A/
+ *
+ * Endpoints:
+ * - GET  /.well-known/agent.json - Agent Card (discovery)
+ * - GET  /a2a/capabilities - List capabilities
+ * - POST /a2a/tasks - Execute a task
+ */
 
 import type { Tenant } from "../tenant";
 import { tenantKey } from "../tenant";
 import type { EmailRecord, Agent } from "../types";
 
-// ==================== A2A Types ====================
+// ==================== Types ====================
 
-interface AgentCard {
+export interface AgentCard {
   name: string;
   description: string;
   url: string;
@@ -20,14 +27,14 @@ interface AgentCard {
   };
 }
 
-interface AgentCapability {
+export interface AgentCapability {
   name: string;
   description: string;
   inputSchema: Record<string, unknown>;
   outputSchema: Record<string, unknown>;
 }
 
-interface A2ATask {
+export interface A2ATask {
   id: string;
   capability: string;
   input: Record<string, unknown>;
@@ -38,116 +45,105 @@ interface A2ATask {
   completedAt?: string;
 }
 
-interface A2ATaskRequest {
+export interface A2ATaskRequest {
   capability: string;
   input: Record<string, unknown>;
 }
 
-interface A2ATaskResponse {
-  task: A2ATask;
-}
-
 // ==================== Agent Card ====================
 
+/**
+ * Agent Card for A2A discovery - describes this agent's capabilities
+ */
 export function getAgentCard(baseUrl: string): AgentCard {
   return {
     name: "Moperator Email Agent",
-    description: "Email for AI — the inbox for your AI agents. Query emails, search by sender or subject, and manage routing agents. Built for LLMs and non-human intelligence.",
+    description:
+      "Email for AI — the inbox for your AI agents. Query emails, search by sender or subject, and get email statistics. Built for LLMs and autonomous systems.",
     url: baseUrl,
     version: "1.0.0",
-    capabilities: [
-      {
-        name: "list_emails",
-        description: "List recent emails with optional pagination",
-        inputSchema: {
-          type: "object",
-          properties: {
-            limit: { type: "number", description: "Max emails to return (default: 20)" },
-            offset: { type: "number", description: "Pagination offset" },
-          },
-        },
-        outputSchema: {
-          type: "object",
-          properties: {
-            emails: { type: "array", items: { type: "object" } },
-            total: { type: "number" },
-          },
-        },
-      },
-      {
-        name: "get_email",
-        description: "Get a specific email by ID",
-        inputSchema: {
-          type: "object",
-          properties: {
-            email_id: { type: "string", description: "Email ID" },
-          },
-          required: ["email_id"],
-        },
-        outputSchema: {
-          type: "object",
-          properties: {
-            email: { type: "object" },
-          },
-        },
-      },
-      {
-        name: "search_emails",
-        description: "Search emails by sender, subject, or routing agent",
-        inputSchema: {
-          type: "object",
-          properties: {
-            from: { type: "string", description: "Sender email (partial match)" },
-            subject: { type: "string", description: "Subject line (partial match)" },
-            agent_id: { type: "string", description: "Routing agent ID" },
-          },
-        },
-        outputSchema: {
-          type: "object",
-          properties: {
-            emails: { type: "array", items: { type: "object" } },
-            count: { type: "number" },
-          },
-        },
-      },
-      {
-        name: "list_agents",
-        description: "List all registered email routing agents",
-        inputSchema: {
-          type: "object",
-          properties: {},
-        },
-        outputSchema: {
-          type: "object",
-          properties: {
-            agents: { type: "array", items: { type: "object" } },
-          },
-        },
-      },
-      {
-        name: "get_stats",
-        description: "Get email processing statistics",
-        inputSchema: {
-          type: "object",
-          properties: {},
-        },
-        outputSchema: {
-          type: "object",
-          properties: {
-            total: { type: "number" },
-            successful: { type: "number" },
-            failed: { type: "number" },
-            avgProcessingTimeMs: { type: "number" },
-          },
-        },
-      },
-    ],
+    capabilities: CAPABILITIES,
     authentication: {
       type: "bearer",
       instructions: "Include your Moperator API key in the Authorization header: Bearer mop_xxx",
     },
   };
 }
+
+/**
+ * Available capabilities - used in both Agent Card and capabilities endpoint
+ */
+export const CAPABILITIES: AgentCapability[] = [
+  {
+    name: "check_inbox",
+    description: "Check your email inbox. Returns a list of recent emails with sender, subject, and preview.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        limit: { type: "number", description: "Max emails to return (default: 20, max: 100)" },
+      },
+    },
+    outputSchema: {
+      type: "object",
+      properties: {
+        emails: { type: "array", items: { type: "object" } },
+        total: { type: "number" },
+      },
+    },
+  },
+  {
+    name: "read_email",
+    description: "Read the full content of a specific email by ID.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        email_id: { type: "string", description: "Email ID to read" },
+      },
+      required: ["email_id"],
+    },
+    outputSchema: {
+      type: "object",
+      properties: {
+        email: { type: "object" },
+      },
+    },
+  },
+  {
+    name: "search_emails",
+    description: "Search emails by sender or subject. Uses partial matching.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        from: { type: "string", description: "Sender email (partial match)" },
+        subject: { type: "string", description: "Subject line (partial match)" },
+      },
+    },
+    outputSchema: {
+      type: "object",
+      properties: {
+        emails: { type: "array", items: { type: "object" } },
+        count: { type: "number" },
+      },
+    },
+  },
+  {
+    name: "email_stats",
+    description: "Get email processing statistics - total count, success rate, etc.",
+    inputSchema: {
+      type: "object",
+      properties: {},
+    },
+    outputSchema: {
+      type: "object",
+      properties: {
+        total: { type: "number" },
+        successful: { type: "number" },
+        failed: { type: "number" },
+        avgProcessingTimeMs: { type: "number" },
+      },
+    },
+  },
+];
 
 // ==================== Task Execution ====================
 
@@ -168,15 +164,8 @@ export async function executeTask(
   };
 
   try {
-    const result = await executeCapability(
-      taskRequest.capability,
-      taskRequest.input,
-      tenant,
-      kv
-    );
-
+    task.output = await executeCapability(taskRequest.capability, taskRequest.input, tenant, kv);
     task.status = "completed";
-    task.output = result;
     task.completedAt = new Date().toISOString();
   } catch (err) {
     task.status = "failed";
@@ -194,35 +183,56 @@ async function executeCapability(
   kv: { agents: KVNamespace; emails: KVNamespace }
 ): Promise<Record<string, unknown>> {
   switch (capability) {
-    case "list_emails": {
+    case "check_inbox": {
       const limit = Math.min(Number(input.limit) || 20, 100);
-      const offset = Number(input.offset) || 0;
-      return await getEmails(kv.emails, tenant.id, limit, offset);
+      const { emails, total } = await getEmails(kv.emails, tenant.id, limit, 0);
+      return {
+        emails: emails.map((e) => ({
+          id: e.id,
+          from: e.email.from,
+          subject: e.email.subject,
+          preview: e.email.textBody?.slice(0, 200) || "",
+          receivedAt: e.email.receivedAt,
+        })),
+        total,
+      };
     }
 
-    case "get_email": {
-      const emailId = String(input.email_id);
+    case "read_email": {
+      const emailId = String(input.email_id || "");
       if (!emailId) throw new Error("email_id is required");
-      const email = await getEmail(kv.emails, tenant.id, emailId);
-      if (!email) throw new Error("Email not found");
-      return { email };
+      const record = await getEmail(kv.emails, tenant.id, emailId);
+      if (!record) throw new Error("Email not found");
+      return {
+        email: {
+          id: record.id,
+          from: record.email.from,
+          to: record.email.to,
+          subject: record.email.subject,
+          body: record.email.textBody,
+          receivedAt: record.email.receivedAt,
+        },
+      };
     }
 
     case "search_emails": {
       const emails = await searchEmails(kv.emails, tenant.id, {
         from: input.from as string | undefined,
         subject: input.subject as string | undefined,
-        agentId: input.agent_id as string | undefined,
       });
-      return { emails, count: emails.length };
+      return {
+        emails: emails.map((e) => ({
+          id: e.id,
+          from: e.email.from,
+          subject: e.email.subject,
+          preview: e.email.textBody?.slice(0, 200) || "",
+          receivedAt: e.email.receivedAt,
+        })),
+        count: emails.length,
+      };
     }
 
-    case "list_agents": {
-      const agents = await getAgents(kv.agents, tenant.id);
-      return { agents };
-    }
-
-    case "get_stats": {
+    case "email_stats": {
       return await getStats(kv.emails, tenant.id);
     }
 
@@ -231,7 +241,7 @@ async function executeCapability(
   }
 }
 
-// ==================== Data Access (Tenant-Scoped) ====================
+// ==================== Data Access ====================
 
 async function getEmails(
   kv: KVNamespace,
@@ -247,21 +257,15 @@ async function getEmails(
   const ids = index.slice(offset, offset + limit);
 
   const emails: EmailRecord[] = [];
-  for (const id of ids) {
-    const data = await kv.get(tenantKey(tenantId, "email", id));
-    if (data) {
-      emails.push(JSON.parse(data));
-    }
+  for (const emailId of ids) {
+    const data = await kv.get(tenantKey(tenantId, "email", emailId));
+    if (data) emails.push(JSON.parse(data));
   }
 
   return { emails, total };
 }
 
-async function getEmail(
-  kv: KVNamespace,
-  tenantId: string,
-  emailId: string
-): Promise<EmailRecord | null> {
+async function getEmail(kv: KVNamespace, tenantId: string, emailId: string): Promise<EmailRecord | null> {
   const data = await kv.get(tenantKey(tenantId, "email", emailId));
   return data ? JSON.parse(data) : null;
 }
@@ -269,7 +273,7 @@ async function getEmail(
 async function searchEmails(
   kv: KVNamespace,
   tenantId: string,
-  query: { from?: string; subject?: string; agentId?: string }
+  query: { from?: string; subject?: string }
 ): Promise<EmailRecord[]> {
   const { emails } = await getEmails(kv, tenantId, 100, 0);
 
@@ -280,51 +284,22 @@ async function searchEmails(
     if (query.subject && !record.email.subject.toLowerCase().includes(query.subject.toLowerCase())) {
       return false;
     }
-    if (query.agentId && record.agentId !== query.agentId) {
-      return false;
-    }
     return true;
   });
-}
-
-async function getAgents(kv: KVNamespace, tenantId: string): Promise<Agent[]> {
-  const list = await kv.list({ prefix: tenantKey(tenantId, "agent") + ":" });
-  const agents: Agent[] = [];
-
-  for (const key of list.keys) {
-    const data = await kv.get(key.name);
-    if (data) {
-      agents.push(JSON.parse(data));
-    }
-  }
-
-  return agents;
 }
 
 async function getStats(
   kv: KVNamespace,
   tenantId: string
-): Promise<{
-  total: number;
-  successful: number;
-  failed: number;
-  avgProcessingTimeMs: number;
-}> {
+): Promise<{ total: number; successful: number; failed: number; avgProcessingTimeMs: number }> {
   const { emails } = await getEmails(kv, tenantId, 100, 0);
 
   const successful = emails.filter((e) => e.dispatchResult.success).length;
   const failed = emails.filter((e) => !e.dispatchResult.success).length;
   const avgProcessingTimeMs =
-    emails.length > 0
-      ? Math.round(emails.reduce((sum, e) => sum + e.processingTimeMs, 0) / emails.length)
-      : 0;
+    emails.length > 0 ? Math.round(emails.reduce((sum, e) => sum + e.processingTimeMs, 0) / emails.length) : 0;
 
-  return {
-    total: emails.length,
-    successful,
-    failed,
-    avgProcessingTimeMs,
-  };
+  return { total: emails.length, successful, failed, avgProcessingTimeMs };
 }
 
 // ==================== HTTP Handlers ====================
@@ -335,10 +310,14 @@ export function handleAgentCardRequest(request: Request): Response {
 
   return new Response(JSON.stringify(getAgentCard(baseUrl), null, 2), {
     status: 200,
-    headers: {
-      "Content-Type": "application/json",
-      "Access-Control-Allow-Origin": "*",
-    },
+    headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" },
+  });
+}
+
+export function handleCapabilitiesRequest(): Response {
+  return new Response(JSON.stringify({ capabilities: CAPABILITIES }, null, 2), {
+    status: 200,
+    headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" },
   });
 }
 
@@ -348,20 +327,20 @@ export async function handleA2ATaskRequest(
   kv: { agents: KVNamespace; emails: KVNamespace }
 ): Promise<Response> {
   if (request.method !== "POST") {
-    return new Response(
-      JSON.stringify({ error: "Method not allowed. Use POST to create tasks." }),
-      { status: 405, headers: { "Content-Type": "application/json" } }
-    );
+    return new Response(JSON.stringify({ error: "Method not allowed. Use POST to create tasks." }), {
+      status: 405,
+      headers: { "Content-Type": "application/json" },
+    });
   }
 
   try {
     const body = (await request.json()) as A2ATaskRequest;
 
     if (!body.capability) {
-      return new Response(
-        JSON.stringify({ error: "Missing required field: capability" }),
-        { status: 400, headers: { "Content-Type": "application/json" } }
-      );
+      return new Response(JSON.stringify({ error: "Missing required field: capability" }), {
+        status: 400,
+        headers: { "Content-Type": "application/json" },
+      });
     }
 
     const task = await executeTask(body, tenant, kv);
@@ -372,22 +351,8 @@ export async function handleA2ATaskRequest(
     });
   } catch (err) {
     return new Response(
-      JSON.stringify({
-        error: "Failed to process task",
-        details: err instanceof Error ? err.message : undefined,
-      }),
+      JSON.stringify({ error: "Failed to process task", details: err instanceof Error ? err.message : undefined }),
       { status: 400, headers: { "Content-Type": "application/json" } }
     );
   }
-}
-
-// ==================== Capability Discovery ====================
-
-export function handleCapabilitiesRequest(): Response {
-  const capabilities = getAgentCard("").capabilities;
-
-  return new Response(JSON.stringify({ capabilities }, null, 2), {
-    status: 200,
-    headers: { "Content-Type": "application/json" },
-  });
 }
