@@ -101,6 +101,8 @@ describe("dispatcher", () => {
         vi.fn().mockResolvedValue({
           ok: true,
           status: 200,
+          statusText: "OK",
+          text: () => Promise.resolve("OK"),
         })
       );
 
@@ -123,6 +125,8 @@ describe("dispatcher", () => {
         vi.fn().mockResolvedValue({
           ok: false,
           status: 500,
+          statusText: "Internal Server Error",
+          text: () => Promise.resolve("Error"),
         })
       );
 
@@ -162,6 +166,8 @@ describe("dispatcher", () => {
       const mockFetch = vi.fn().mockResolvedValue({
         ok: true,
         status: 200,
+        statusText: "OK",
+        text: () => Promise.resolve("OK"),
       });
       vi.stubGlobal("fetch", mockFetch);
 
@@ -179,6 +185,8 @@ describe("dispatcher", () => {
       const mockFetch = vi.fn().mockResolvedValue({
         ok: true,
         status: 200,
+        statusText: "OK",
+        text: () => Promise.resolve("OK"),
       });
       vi.stubGlobal("fetch", mockFetch);
 

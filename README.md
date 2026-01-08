@@ -110,18 +110,33 @@ Wrangler CLI is included as a dev dependency. Use `npx wrangler` to run commands
 npx wrangler login
 ```
 
-2. **Create a KV namespace:**
+2. **Create KV namespaces:**
 
 ```bash
 npx wrangler kv namespace create AGENT_REGISTRY
+npx wrangler kv namespace create EMAIL_HISTORY
+npx wrangler kv namespace create RETRY_QUEUE
+npx wrangler kv namespace create RATE_LIMIT
 ```
 
-3. **Update `wrangler.toml`** with the returned namespace ID:
+3. **Update `wrangler.toml`** with the returned namespace IDs:
 
 ```toml
 [[kv_namespaces]]
 binding = "AGENT_REGISTRY"
-id = "your-namespace-id-here"
+id = "your-agent-registry-id"
+
+[[kv_namespaces]]
+binding = "EMAIL_HISTORY"
+id = "your-email-history-id"
+
+[[kv_namespaces]]
+binding = "RETRY_QUEUE"
+id = "your-retry-queue-id"
+
+[[kv_namespaces]]
+binding = "RATE_LIMIT"
+id = "your-rate-limit-id"
 ```
 
 4. **Set secrets:**
@@ -129,6 +144,7 @@ id = "your-namespace-id-here"
 ```bash
 npx wrangler secret put ANTHROPIC_API_KEY
 npx wrangler secret put WEBHOOK_SIGNING_KEY
+npx wrangler secret put API_KEY  # Optional: for API authentication
 ```
 
 ### Deployment
@@ -145,6 +161,8 @@ npm run deploy
 
 ## API Reference
 
+### Agent Management
+
 | Method | Endpoint | Description |
 |--------|----------|-------------|
 | `GET` | `/health` | Health check |
@@ -152,6 +170,24 @@ npm run deploy
 | `POST` | `/agents` | Register a new agent |
 | `DELETE` | `/agents/:id` | Delete an agent |
 | `POST` | `/test-route` | Test email routing (dev/debug) |
+
+### Email History
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| `GET` | `/emails` | List recent emails (supports `?limit=20&offset=0`) |
+| `GET` | `/emails/stats` | Get processing statistics |
+| `GET` | `/emails/search` | Search emails (`?from=&subject=&agentId=`) |
+| `GET` | `/emails/:id` | Get single email record by ID |
+
+### Retry Queue
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| `GET` | `/retry/stats` | Get retry queue statistics |
+| `GET` | `/retry/pending` | List pending retry items |
+| `GET` | `/retry/dead` | List dead letter items (failed after max retries) |
+| `POST` | `/retry/process` | Manually trigger retry processing |
 
 ### Health Check
 
@@ -221,6 +257,57 @@ curl -X POST https://moperator.your-subdomain.workers.dev/test-route \
     { "id": "support-bot", "name": "SupportBot" }
   ]
 }
+```
+
+### Email History
+
+```bash
+# Get processing statistics
+curl https://moperator.your-subdomain.workers.dev/emails/stats
+```
+
+```json
+{
+  "total": 42,
+  "successful": 38,
+  "failed": 4,
+  "avgProcessingTimeMs": 1250
+}
+```
+
+```bash
+# List recent emails with pagination
+curl "https://moperator.your-subdomain.workers.dev/emails?limit=10&offset=0"
+```
+
+```bash
+# Search emails by sender or subject
+curl "https://moperator.your-subdomain.workers.dev/emails/search?from=vendor@company.com"
+```
+
+### Retry Queue
+
+```bash
+# Get retry queue statistics
+curl https://moperator.your-subdomain.workers.dev/retry/stats
+```
+
+```json
+{
+  "pending": 2,
+  "deadLettered": 1
+}
+```
+
+```bash
+# List pending retries
+curl https://moperator.your-subdomain.workers.dev/retry/pending
+
+# List dead letter items (failed after 5 attempts)
+curl https://moperator.your-subdomain.workers.dev/retry/dead
+
+# Manually trigger retry processing
+curl -X POST https://moperator.your-subdomain.workers.dev/retry/process
 ```
 
 ## Webhook Payload
@@ -298,16 +385,21 @@ npm run test:coverage
 ```
 moperator/
 ├── src/
-│   ├── index.ts        # Worker entry point (email + HTTP handlers)
-│   ├── types.ts        # TypeScript interfaces
-│   ├── email-parser.ts # MIME parsing with postal-mime
-│   ├── router.ts       # Claude routing logic
-│   └── dispatcher.ts   # Webhook dispatch with HMAC signing
-├── agent-example/      # Example agent implementation
-│   ├── server.js       # Express server with webhook handler
-│   └── README.md       # Agent setup instructions
-├── wrangler.toml       # Cloudflare Worker configuration
-├── vitest.config.ts    # Test configuration
+│   ├── index.ts          # Worker entry point (email + HTTP handlers)
+│   ├── types.ts          # TypeScript interfaces
+│   ├── email-parser.ts   # MIME parsing with postal-mime
+│   ├── router.ts         # Claude routing logic
+│   ├── dispatcher.ts     # Webhook dispatch with HMAC signing
+│   ├── email-history.ts  # Email history storage
+│   ├── retry-queue.ts    # Webhook retry queue with exponential backoff
+│   ├── rate-limiter.ts   # Rate limiting middleware
+│   ├── auth.ts           # API key authentication
+│   └── __tests__/        # Test files
+├── agent-example/        # Example agent implementation
+│   ├── server.js         # Express server with webhook handler
+│   └── README.md         # Agent setup instructions
+├── wrangler.toml         # Cloudflare Worker configuration
+├── vitest.config.ts      # Test configuration
 ├── tsconfig.json
 └── package.json
 ```
@@ -331,12 +423,53 @@ Then expose it publicly with cloudflared or ngrok and register it as an agent.
 
 See [agent-example/README.md](agent-example/README.md) for details.
 
+## Security
+
+### Rate Limiting
+
+All API endpoints are rate-limited to prevent abuse:
+
+| Operation Type | Limit |
+|----------------|-------|
+| Read (GET) | 60 requests/minute |
+| Write (POST/DELETE) | 10 requests/minute |
+
+When rate limited, you'll receive a `429 Too Many Requests` response with a `Retry-After` header.
+
+### API Key Authentication
+
+Sensitive endpoints require API key authentication:
+
+- `POST /agents` - Register agent
+- `DELETE /agents/:id` - Delete agent
+- `POST /retry/process` - Trigger retry processing
+- `POST /test-route` - Test routing (consumes Claude API credits)
+
+To authenticate, include the `Authorization` header:
+
+```bash
+curl -X POST https://moperator.your-subdomain.workers.dev/agents \
+  -H "Authorization: Bearer your-api-key" \
+  -H "Content-Type: application/json" \
+  -d '{"id": "my-bot", ...}'
+```
+
+If no `API_KEY` secret is configured, authentication is disabled (dev mode).
+
+### Input Validation
+
+- Agent IDs: alphanumeric, dashes, and underscores only
+- Webhook URLs: must be valid URLs
+- Field lengths: name (100 chars), description (500 chars), body (10KB)
+- Pagination: limit capped at 100, offset must be non-negative
+
 ## Environment Variables
 
 | Variable | Description |
 |----------|-------------|
 | `ANTHROPIC_API_KEY` | Your Anthropic API key for Claude |
 | `WEBHOOK_SIGNING_KEY` | Secret key for HMAC webhook signatures |
+| `API_KEY` | (Optional) API key for protecting management endpoints |
 
 ### About WEBHOOK_SIGNING_KEY
 

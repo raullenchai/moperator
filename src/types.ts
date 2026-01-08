@@ -1,8 +1,12 @@
 // Environment bindings
 export interface Env {
   AGENT_REGISTRY: KVNamespace;
+  EMAIL_HISTORY: KVNamespace;
+  RETRY_QUEUE: KVNamespace;
+  RATE_LIMIT: KVNamespace;
   ANTHROPIC_API_KEY: string;
   WEBHOOK_SIGNING_KEY: string;
+  API_KEY?: string; // Optional API key for protecting management endpoints
 }
 
 // Agent registered in KV
@@ -55,4 +59,41 @@ export interface ClaudeResponse {
 export interface RoutingDecision {
   agentId: string;
   reason: string;
+}
+
+// Email history record
+export interface EmailRecord {
+  id: string;
+  email: ParsedEmail;
+  routingDecision: RoutingDecision;
+  dispatchResult: {
+    success: boolean;
+    statusCode?: number;
+    error?: string;
+  };
+  agentId: string;
+  processedAt: string;
+  processingTimeMs: number;
+}
+
+// Retry queue item
+export interface RetryItem {
+  id: string;
+  email: ParsedEmail;
+  agentId: string;
+  webhookUrl: string;
+  routingReason: string;
+  attempts: number;
+  maxAttempts: number;
+  lastAttempt: string;
+  nextAttempt: string;
+  lastError?: string;
+  createdAt: string;
+}
+
+// Dispatch result with more details
+export interface DispatchResult {
+  success: boolean;
+  statusCode?: number;
+  error?: string;
 }

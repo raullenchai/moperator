@@ -8,9 +8,28 @@ compatibility_flags = ["nodejs_compat"]
 binding = "AGENT_REGISTRY"
 id = "72d1d8cbfa2d49dba119ab8192d0abd6"
 
+# KV namespace for email history
+[[kv_namespaces]]
+binding = "EMAIL_HISTORY"
+id = "e16f32908a8d4b5e879da6a91a0eaafa"
+
+# KV namespace for retry queue
+[[kv_namespaces]]
+binding = "RETRY_QUEUE"
+id = "b6550b26572e462bad5014410f18684f"
+
+# KV namespace for rate limiting
+[[kv_namespaces]]
+binding = "RATE_LIMIT"
+id = "73009adf28f0493885e23201fb0942f2"
+
+# Cron trigger for retry processing (every 5 minutes)
+[triggers]
+crons = ["*/5 * * * *"]
+
 # Secrets (set via wrangler secret put):
 # - ANTHROPIC_API_KEY: Claude API key
 # - WEBHOOK_SIGNING_KEY: HMAC signing key for webhook payloads
 
 # Email routing (configure in Cloudflare dashboard)
-# Routes: *@moperator.ai -> this worker
+# Routes: *@moperator.work -> this worker

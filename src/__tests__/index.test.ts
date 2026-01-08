@@ -6,12 +6,54 @@ import {
 import { describe, it, expect, beforeEach } from "vitest";
 import worker from "../index";
 
+interface AgentResponse {
+  agents: Array<{ id: string; name: string }>;
+}
+
+interface SingleAgentResponse {
+  agent: { id: string; active: boolean };
+}
+
+interface ErrorResponse {
+  error: string;
+}
+
+interface DeleteResponse {
+  deleted: string;
+}
+
+interface EmailsResponse {
+  emails: Array<{ id: string }>;
+  total: number;
+}
+
+interface StatsResponse {
+  total: number;
+  successful: number;
+  failed: number;
+}
+
+interface RetryStatsResponse {
+  pending: number;
+  deadLettered: number;
+}
+
 describe("API endpoints", () => {
   beforeEach(async () => {
     // Clear KV before each test
-    const keys = await env.AGENT_REGISTRY.list();
-    for (const key of keys.keys) {
+    const registryKeys = await env.AGENT_REGISTRY.list();
+    for (const key of registryKeys.keys) {
       await env.AGENT_REGISTRY.delete(key.name);
+    }
+
+    const historyKeys = await env.EMAIL_HISTORY.list();
+    for (const key of historyKeys.keys) {
+      await env.EMAIL_HISTORY.delete(key.name);
+    }
+
+    const retryKeys = await env.RETRY_QUEUE.list();
+    for (const key of retryKeys.keys) {
+      await env.RETRY_QUEUE.delete(key.name);
     }
   });
 
@@ -36,12 +78,11 @@ describe("API endpoints", () => {
       await waitOnExecutionContext(ctx);
 
       expect(response.status).toBe(200);
-      const body = await response.json();
+      const body = (await response.json()) as AgentResponse;
       expect(body).toEqual({ agents: [] });
     });
 
     it("returns registered agents", async () => {
-      // Register an agent first
       await env.AGENT_REGISTRY.put(
         "agent:test-bot",
         JSON.stringify({
@@ -59,7 +100,7 @@ describe("API endpoints", () => {
       await waitOnExecutionContext(ctx);
 
       expect(response.status).toBe(200);
-      const body = await response.json();
+      const body = (await response.json()) as AgentResponse;
       expect(body.agents).toHaveLength(1);
       expect(body.agents[0].id).toBe("test-bot");
     });
@@ -82,11 +123,10 @@ describe("API endpoints", () => {
       await waitOnExecutionContext(ctx);
 
       expect(response.status).toBe(201);
-      const body = await response.json();
+      const body = (await response.json()) as SingleAgentResponse;
       expect(body.agent.id).toBe("new-bot");
       expect(body.agent.active).toBe(true);
 
-      // Verify it's in KV
       const stored = await env.AGENT_REGISTRY.get("agent:new-bot");
       expect(stored).toBeDefined();
     });
@@ -97,7 +137,6 @@ describe("API endpoints", () => {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           id: "incomplete-bot",
-          // missing name, description, webhookUrl
         }),
       });
       const ctx = createExecutionContext();
@@ -105,14 +144,13 @@ describe("API endpoints", () => {
       await waitOnExecutionContext(ctx);
 
       expect(response.status).toBe(400);
-      const body = await response.json();
-      expect(body.error).toBe("Missing required fields");
+      const body = (await response.json()) as ErrorResponse;
+      expect(body.error).toBe("Missing required fields: id, name, description, webhookUrl");
     });
   });
 
   describe("DELETE /agents/:id", () => {
     it("deletes an existing agent", async () => {
-      // Register an agent first
       await env.AGENT_REGISTRY.put(
         "agent:delete-me",
         JSON.stringify({
@@ -132,12 +170,82 @@ describe("API endpoints", () => {
       await waitOnExecutionContext(ctx);
 
       expect(response.status).toBe(200);
-      const body = await response.json();
+      const body = (await response.json()) as DeleteResponse;
       expect(body.deleted).toBe("delete-me");
 
-      // Verify it's removed from KV
       const stored = await env.AGENT_REGISTRY.get("agent:delete-me");
       expect(stored).toBeNull();
+    });
+  });
+
+  describe("GET /emails", () => {
+    it("returns empty list when no emails", async () => {
+      const request = new Request("http://localhost/emails");
+      const ctx = createExecutionContext();
+      const response = await worker.fetch(request, env, ctx);
+      await waitOnExecutionContext(ctx);
+
+      expect(response.status).toBe(200);
+      const body = (await response.json()) as EmailsResponse;
+      expect(body.emails).toEqual([]);
+      expect(body.total).toBe(0);
+    });
+  });
+
+  describe("GET /emails/stats", () => {
+    it("returns stats with zeros when no emails", async () => {
+      const request = new Request("http://localhost/emails/stats");
+      const ctx = createExecutionContext();
+      const response = await worker.fetch(request, env, ctx);
+      await waitOnExecutionContext(ctx);
+
+      expect(response.status).toBe(200);
+      const body = (await response.json()) as StatsResponse;
+      expect(body.total).toBe(0);
+      expect(body.successful).toBe(0);
+      expect(body.failed).toBe(0);
+    });
+  });
+
+  describe("GET /retry/stats", () => {
+    it("returns stats with zeros when queue is empty", async () => {
+      const request = new Request("http://localhost/retry/stats");
+      const ctx = createExecutionContext();
+      const response = await worker.fetch(request, env, ctx);
+      await waitOnExecutionContext(ctx);
+
+      expect(response.status).toBe(200);
+      const body = (await response.json()) as RetryStatsResponse;
+      expect(body.pending).toBe(0);
+      expect(body.deadLettered).toBe(0);
+    });
+  });
+
+  describe("GET /retry/pending", () => {
+    it("returns empty list when no pending retries", async () => {
+      const request = new Request("http://localhost/retry/pending");
+      const ctx = createExecutionContext();
+      const response = await worker.fetch(request, env, ctx);
+      await waitOnExecutionContext(ctx);
+
+      expect(response.status).toBe(200);
+      const body = (await response.json()) as { items: unknown[]; count: number };
+      expect(body.items).toEqual([]);
+      expect(body.count).toBe(0);
+    });
+  });
+
+  describe("GET /retry/dead", () => {
+    it("returns empty list when no dead letters", async () => {
+      const request = new Request("http://localhost/retry/dead");
+      const ctx = createExecutionContext();
+      const response = await worker.fetch(request, env, ctx);
+      await waitOnExecutionContext(ctx);
+
+      expect(response.status).toBe(200);
+      const body = (await response.json()) as { items: unknown[]; count: number };
+      expect(body.items).toEqual([]);
+      expect(body.count).toBe(0);
     });
   });
 
@@ -149,7 +257,7 @@ describe("API endpoints", () => {
       await waitOnExecutionContext(ctx);
 
       expect(response.status).toBe(404);
-      const body = await response.json();
+      const body = (await response.json()) as ErrorResponse;
       expect(body.error).toBe("Not found");
     });
   });
