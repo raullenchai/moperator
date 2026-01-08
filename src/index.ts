@@ -4,8 +4,31 @@ import { routeEmail } from "./router";
 import { dispatchToAgent } from "./dispatcher";
 import { saveEmailRecord, getRecentEmails, getEmailRecord, getEmailStats, searchEmails } from "./email-history";
 import { addToRetryQueue, processRetryQueue, getQueueStats, getRetryItems, getDeadLetterItems } from "./retry-queue";
-import { checkRateLimit, getClientId, rateLimitResponse, DEFAULT_CONFIG, STRICT_CONFIG } from "./rate-limiter";
+import { checkRateLimit, getClientId, rateLimitResponse, checkTenantRateLimit, DEFAULT_CONFIG, STRICT_CONFIG } from "./rate-limiter";
 import { verifyApiKey, unauthorizedResponse } from "./auth";
+import { checkAllAgentsHealth, checkAgentHealth, getHealthSummary, reEnableAgent } from "./health-check";
+import type { AgentWithHealth } from "./health-check";
+
+// Protocol imports
+import { handleMCPHttp } from "./protocols/mcp";
+import { handleAgentCardRequest, handleA2ATaskRequest, handleCapabilitiesRequest } from "./protocols/a2a";
+import { handleOpenAPIRequest } from "./protocols/openapi";
+
+// Tenant management
+import {
+  authenticateByApiKey,
+  getTenantByEmail,
+  createTenant,
+  getTenant,
+  listTenants,
+  deleteTenant,
+  regenerateApiKey,
+  updateTenantSettings,
+  incrementUsage,
+  resetDailyUsage,
+  tenantKey,
+  type Tenant,
+} from "./tenant";
 
 export default {
   // Handle incoming emails
@@ -20,22 +43,34 @@ export default {
     console.log("=".repeat(60));
     console.log(`[EMAIL] From: ${message.from}`);
     console.log(`[EMAIL] To: ${message.to}`);
-    console.log(`[EMAIL] Headers: ${JSON.stringify(Object.fromEntries(message.headers))}`);
+
+    // Find tenant by destination email
+    const tenant = await getTenantByEmail(env.TENANTS, message.to);
+    if (!tenant) {
+      console.error(`[ERROR] No tenant found for email: ${message.to}`);
+      return;
+    }
+    console.log(`[TENANT] Routing for tenant: ${tenant.id} (${tenant.name})`);
+
+    // Check daily email limit
+    if (tenant.usage.emailsToday >= tenant.settings.maxEmailsPerDay) {
+      console.error(`[ERROR] Tenant ${tenant.id} exceeded daily email limit (${tenant.settings.maxEmailsPerDay})`);
+      return;
+    }
 
     // Parse the email
     console.log("[PARSE] Parsing email content...");
     const email = await parseEmail(message);
     console.log(`[PARSE] Subject: "${email.subject}"`);
     console.log(`[PARSE] Body preview: "${email.textBody.slice(0, 200)}..."`);
-    console.log(`[PARSE] Attachments: ${email.attachments.length}`);
 
-    // Get active agents from registry
-    console.log("[REGISTRY] Fetching active agents...");
-    const agents = await getActiveAgents(env.AGENT_REGISTRY);
+    // Get tenant's active agents from registry
+    console.log("[REGISTRY] Fetching tenant's active agents...");
+    const agents = await getTenantAgents(env.AGENT_REGISTRY, tenant.id);
     console.log(`[REGISTRY] Found ${agents.length} active agents: ${agents.map(a => a.id).join(", ")}`);
 
     if (agents.length === 0) {
-      console.error("[ERROR] No agents registered, email will be dropped");
+      console.error("[ERROR] No agents registered for tenant, email will be dropped");
       return;
     }
 
@@ -63,8 +98,12 @@ export default {
 
     const duration = Date.now() - startTime;
 
-    // Save to email history
-    await saveEmailRecord(env.EMAIL_HISTORY, email, decision, result, duration);
+    // Save to tenant-scoped email history
+    await saveTenantEmailRecord(env.EMAIL_HISTORY, tenant.id, email, decision, result, duration);
+
+    // Update usage stats
+    await incrementUsage(env.TENANTS, tenant.id, "emailsToday");
+    await incrementUsage(env.TENANTS, tenant.id, "emailsTotal");
 
     if (result.success) {
       console.log(`[DISPATCH] SUCCESS - Status: ${result.statusCode}`);
@@ -72,31 +111,46 @@ export default {
     } else {
       console.error(`[DISPATCH] FAILED - ${result.error || `Status: ${result.statusCode}`}`);
 
-      // Add to retry queue
+      // Add to tenant-scoped retry queue
       await addToRetryQueue(
         env.RETRY_QUEUE,
         email,
         targetAgent.id,
         targetAgent.webhookUrl,
         decision.reason,
-        result.error || `Status: ${result.statusCode}`
+        result.error || `Status: ${result.statusCode}`,
+        tenant.id // Tenant scoping
       );
     }
     console.log("=".repeat(60));
   },
 
-  // Scheduled handler for retry processing
+  // Scheduled handler for retry processing and health checks
   async scheduled(
-    _event: ScheduledEvent,
+    event: ScheduledEvent,
     env: Env,
     _ctx: ExecutionContext
   ): Promise<void> {
+    // Run retry queue processing
     console.log("[CRON] Starting retry queue processing...");
-    const stats = await processRetryQueue(env.RETRY_QUEUE, env.WEBHOOK_SIGNING_KEY);
-    console.log(`[CRON] Processed: ${stats.processed}, Succeeded: ${stats.succeeded}, Failed: ${stats.failed}, Dead Lettered: ${stats.deadLettered}`);
+    const retryStats = await processRetryQueue(env.RETRY_QUEUE, env.WEBHOOK_SIGNING_KEY);
+    console.log(`[CRON] Retry: ${retryStats.processed} processed, ${retryStats.succeeded} succeeded, ${retryStats.failed} failed, ${retryStats.deadLettered} dead lettered`);
+
+    // Run health checks on agents
+    console.log("[CRON] Starting agent health checks...");
+    const healthStats = await checkAllAgentsHealth(env.AGENT_REGISTRY);
+    console.log(`[CRON] Health: ${healthStats.checked} checked, ${healthStats.healthy} healthy, ${healthStats.unhealthy} unhealthy, ${healthStats.disabled} disabled`);
+
+    // Reset daily usage at midnight (check if triggered at midnight cron)
+    const now = new Date();
+    if (now.getUTCHours() === 0 && now.getUTCMinutes() < 5) {
+      console.log("[CRON] Resetting daily usage counters...");
+      const resetCount = await resetDailyUsage(env.TENANTS);
+      console.log(`[CRON] Reset daily usage for ${resetCount} tenants`);
+    }
   },
 
-  // HTTP API for managing agents
+  // HTTP API for managing agents and protocols
   async fetch(
     request: Request,
     env: Env,
@@ -105,42 +159,219 @@ export default {
     const url = new URL(request.url);
     const clientId = getClientId(request);
 
+    // CORS preflight
+    if (request.method === "OPTIONS") {
+      return new Response(null, {
+        headers: {
+          "Access-Control-Allow-Origin": "*",
+          "Access-Control-Allow-Methods": "GET, POST, DELETE, OPTIONS",
+          "Access-Control-Allow-Headers": "Content-Type, Authorization",
+        },
+      });
+    }
+
+    // ================== PUBLIC ENDPOINTS ==================
+
     // Health check (no rate limit, no auth)
     if (url.pathname === "/health") {
-      return json({ status: "ok", service: "moperator" });
+      return json({ status: "ok", service: "moperator", version: "2.0.0" });
     }
 
-    // ================== RATE LIMITING ==================
-    // Use RATE_LIMIT KV if available, fallback to AGENT_REGISTRY for storage
+    // OpenAPI spec for ChatGPT Custom GPT Actions
+    if (url.pathname === "/openapi.json" || url.pathname === "/openapi.yaml") {
+      return handleOpenAPIRequest(request);
+    }
+
+    // A2A Agent Card (discovery endpoint)
+    if (url.pathname === "/.well-known/agent.json") {
+      return handleAgentCardRequest(request);
+    }
+
+    // A2A Capabilities (discovery endpoint)
+    if (url.pathname === "/a2a/capabilities" && request.method === "GET") {
+      return handleCapabilitiesRequest();
+    }
+
+    // ================== ADMIN ENDPOINTS (System-wide) ==================
+
+    // Tenant management requires ADMIN_SECRET
+    if (url.pathname.startsWith("/admin/")) {
+      const adminSecret = request.headers.get("X-Admin-Secret");
+      if (!adminSecret || adminSecret !== env.ADMIN_SECRET) {
+        return json({ error: "Admin access required" }, 403);
+      }
+
+      // Apply admin rate limiting
+      const rateLimitKv = env.RATE_LIMIT || env.AGENT_REGISTRY;
+      const rateLimit = await checkRateLimit(rateLimitKv, `admin:${clientId}`, STRICT_CONFIG);
+      if (!rateLimit.allowed) {
+        return rateLimitResponse(rateLimit.resetAt);
+      }
+
+      // List all tenants
+      if (url.pathname === "/admin/tenants" && request.method === "GET") {
+        const tenants = await listTenants(env.TENANTS);
+        return json({ tenants: tenants.map(t => ({ ...t, apiKey: undefined })), count: tenants.length });
+      }
+
+      // Create tenant
+      if (url.pathname === "/admin/tenants" && request.method === "POST") {
+        try {
+          const body = await request.json() as { id: string; name: string; email: string };
+          if (!body.id || !body.name || !body.email) {
+            return json({ error: "Missing required fields: id, name, email" }, 400);
+          }
+          const result = await createTenant(env.TENANTS, body);
+          return json({ tenant: { ...result.tenant, apiKey: undefined }, apiKey: result.apiKey }, 201);
+        } catch (err) {
+          return json({ error: err instanceof Error ? err.message : "Failed to create tenant" }, 400);
+        }
+      }
+
+      // Get specific tenant
+      if (url.pathname.match(/^\/admin\/tenants\/[\w-]+$/) && request.method === "GET") {
+        const tenantId = url.pathname.split("/")[3];
+        const tenant = await getTenant(env.TENANTS, tenantId);
+        if (!tenant) {
+          return json({ error: "Tenant not found" }, 404);
+        }
+        return json({ tenant: { ...tenant, apiKey: undefined } });
+      }
+
+      // Regenerate tenant API key
+      if (url.pathname.match(/^\/admin\/tenants\/[\w-]+\/regenerate-key$/) && request.method === "POST") {
+        const tenantId = url.pathname.split("/")[3];
+        const result = await regenerateApiKey(env.TENANTS, tenantId);
+        if (!result) {
+          return json({ error: "Tenant not found" }, 404);
+        }
+        return json({ apiKey: result.apiKey });
+      }
+
+      // Update tenant settings
+      if (url.pathname.match(/^\/admin\/tenants\/[\w-]+\/settings$/) && request.method === "PATCH") {
+        const tenantId = url.pathname.split("/")[3];
+        const settings = await request.json();
+        const tenant = await updateTenantSettings(env.TENANTS, tenantId, settings as any);
+        if (!tenant) {
+          return json({ error: "Tenant not found" }, 404);
+        }
+        return json({ tenant: { ...tenant, apiKey: undefined } });
+      }
+
+      // Delete tenant
+      if (url.pathname.match(/^\/admin\/tenants\/[\w-]+$/) && request.method === "DELETE") {
+        const tenantId = url.pathname.split("/")[3];
+        const deleted = await deleteTenant(env.TENANTS, tenantId);
+        if (!deleted) {
+          return json({ error: "Tenant not found" }, 404);
+        }
+        return json({ deleted: tenantId });
+      }
+
+      return json({ error: "Admin endpoint not found" }, 404);
+    }
+
+    // ================== LEGACY ENDPOINTS (API_KEY auth, backwards compat) ==================
+    // These endpoints use the old API_KEY authentication for system-wide management
+
+    if (url.pathname === "/agents" || url.pathname.startsWith("/agents/") ||
+        url.pathname === "/health/agents" || url.pathname.startsWith("/health/") ||
+        url.pathname === "/emails" || url.pathname.startsWith("/emails/") ||
+        url.pathname === "/retry" || url.pathname.startsWith("/retry/") ||
+        url.pathname === "/test-route") {
+
+      // Apply IP-based rate limiting for legacy endpoints
+      const rateLimitKv = env.RATE_LIMIT || env.AGENT_REGISTRY;
+      const isWriteOperation = request.method === "POST" || request.method === "DELETE";
+      const config = isWriteOperation ? STRICT_CONFIG : DEFAULT_CONFIG;
+      const rateLimit = await checkRateLimit(rateLimitKv, clientId, config);
+      if (!rateLimit.allowed) {
+        return rateLimitResponse(rateLimit.resetAt);
+      }
+
+      return handleLegacyEndpoints(request, env, url);
+    }
+
+    // ================== AUTHENTICATED TENANT ENDPOINTS ==================
+
+    // Extract and verify tenant API key
+    const authHeader = request.headers.get("Authorization");
+    const apiKey = authHeader?.startsWith("Bearer ") ? authHeader.slice(7) : null;
+
+    if (!apiKey) {
+      return json({ error: "Authorization required. Use Bearer token with your API key." }, 401);
+    }
+
+    const tenant = await authenticateByApiKey(env.TENANTS, apiKey);
+    if (!tenant) {
+      return json({ error: "Invalid API key" }, 401);
+    }
+
+    // Apply per-tenant rate limiting
     const rateLimitKv = env.RATE_LIMIT || env.AGENT_REGISTRY;
-
-    // Determine rate limit config based on request type
-    const isWriteOperation = request.method === "POST" || request.method === "DELETE";
-    const config = isWriteOperation ? STRICT_CONFIG : DEFAULT_CONFIG;
-
-    const rateLimit = await checkRateLimit(rateLimitKv, clientId, config);
-    if (!rateLimit.allowed) {
-      console.log(`[RATE_LIMIT] Blocked ${clientId} - exceeded ${config.maxRequests} requests/min`);
-      return rateLimitResponse(rateLimit.resetAt);
+    const tenantRateLimit = await checkTenantRateLimit(rateLimitKv, tenant);
+    if (!tenantRateLimit.allowed) {
+      console.log(`[RATE_LIMIT] Blocked tenant ${tenant.id} - exceeded ${tenant.settings.rateLimitPerMinute} requests/min`);
+      return rateLimitResponse(tenantRateLimit.resetAt);
     }
 
-    // ================== AGENT ENDPOINTS ==================
+    // ================== PROTOCOL ENDPOINTS ==================
 
-    // List agents
-    if (url.pathname === "/agents" && request.method === "GET") {
-      const agents = await getActiveAgents(env.AGENT_REGISTRY);
+    // MCP endpoint for Claude Desktop
+    if (url.pathname === "/mcp" && request.method === "POST") {
+      if (!tenant.settings.enabledProtocols.includes("mcp")) {
+        return json({ error: "MCP protocol not enabled for this tenant" }, 403);
+      }
+      return handleMCPHttp(request, tenant, {
+        agents: env.AGENT_REGISTRY,
+        emails: env.EMAIL_HISTORY,
+      });
+    }
+
+    // A2A task endpoint for Gemini
+    if (url.pathname === "/a2a/tasks" && request.method === "POST") {
+      if (!tenant.settings.enabledProtocols.includes("a2a")) {
+        return json({ error: "A2A protocol not enabled for this tenant" }, 403);
+      }
+      return handleA2ATaskRequest(request, tenant, {
+        agents: env.AGENT_REGISTRY,
+        emails: env.EMAIL_HISTORY,
+      });
+    }
+
+    // ================== TENANT API ENDPOINTS ==================
+
+    // Get current tenant info
+    if (url.pathname === "/api/v1/me" && request.method === "GET") {
+      return json({
+        tenant: {
+          id: tenant.id,
+          name: tenant.name,
+          email: tenant.email,
+          settings: tenant.settings,
+          usage: tenant.usage,
+          createdAt: tenant.createdAt,
+        }
+      });
+    }
+
+    // List tenant's agents
+    if (url.pathname === "/api/v1/agents" && request.method === "GET") {
+      const agents = await getTenantAgents(env.AGENT_REGISTRY, tenant.id);
       return json({ agents });
     }
 
-    // Register agent (requires API key)
-    if (url.pathname === "/agents" && request.method === "POST") {
-      if (!verifyApiKey(request, env.API_KEY)) {
-        return unauthorizedResponse();
+    // Register agent for tenant
+    if (url.pathname === "/api/v1/agents" && request.method === "POST") {
+      // Check agent limit
+      if (tenant.usage.agentCount >= tenant.settings.maxAgents) {
+        return json({ error: `Maximum agents (${tenant.settings.maxAgents}) reached` }, 400);
       }
 
       let body: Partial<Agent>;
       try {
-        body = (await request.json()) as Partial<Agent>;
+        body = await request.json() as Partial<Agent>;
       } catch {
         return json({ error: "Invalid JSON body" }, 400);
       }
@@ -149,12 +380,10 @@ export default {
         return json({ error: "Missing required fields: id, name, description, webhookUrl" }, 400);
       }
 
-      // Validate agent ID format (alphanumeric, dashes, underscores only)
       if (!/^[a-zA-Z0-9_-]+$/.test(body.id)) {
-        return json({ error: "Invalid agent ID format. Use only letters, numbers, dashes, and underscores." }, 400);
+        return json({ error: "Invalid agent ID format" }, 400);
       }
 
-      // Validate webhook URL
       try {
         new URL(body.webhookUrl);
       } catch {
@@ -163,153 +392,439 @@ export default {
 
       const agent: Agent = {
         id: body.id,
-        name: body.name.slice(0, 100), // Limit name length
-        description: body.description.slice(0, 500), // Limit description length
+        name: body.name.slice(0, 100),
+        description: body.description.slice(0, 500),
         webhookUrl: body.webhookUrl,
         active: body.active ?? true,
       };
 
-      await env.AGENT_REGISTRY.put(`agent:${agent.id}`, JSON.stringify(agent));
+      // Store with tenant-scoped key
+      await env.AGENT_REGISTRY.put(tenantKey(tenant.id, "agent", agent.id), JSON.stringify(agent));
+      await incrementUsage(env.TENANTS, tenant.id, "agentCount");
+
       return json({ agent }, 201);
     }
 
-    // Delete agent (requires API key)
-    if (url.pathname.startsWith("/agents/") && request.method === "DELETE") {
-      if (!verifyApiKey(request, env.API_KEY)) {
-        return unauthorizedResponse();
-      }
-
-      const agentId = url.pathname.split("/")[2];
+    // Delete tenant's agent
+    if (url.pathname.match(/^\/api\/v1\/agents\/[\w-]+$/) && request.method === "DELETE") {
+      const agentId = url.pathname.split("/")[4];
       if (!agentId || !/^[a-zA-Z0-9_-]+$/.test(agentId)) {
         return json({ error: "Invalid agent ID" }, 400);
       }
 
-      await env.AGENT_REGISTRY.delete(`agent:${agentId}`);
+      const key = tenantKey(tenant.id, "agent", agentId);
+      const existing = await env.AGENT_REGISTRY.get(key);
+      if (!existing) {
+        return json({ error: "Agent not found" }, 404);
+      }
+
+      await env.AGENT_REGISTRY.delete(key);
+      await incrementUsage(env.TENANTS, tenant.id, "agentCount", -1);
+
       return json({ deleted: agentId });
     }
 
-    // ================== EMAIL HISTORY ENDPOINTS ==================
-
-    // Get email stats
-    if (url.pathname === "/emails/stats" && request.method === "GET") {
-      const stats = await getEmailStats(env.EMAIL_HISTORY);
-      return json(stats);
-    }
-
-    // List recent emails
-    if (url.pathname === "/emails" && request.method === "GET") {
+    // List tenant's emails
+    if (url.pathname === "/api/v1/emails" && request.method === "GET") {
       const limitParam = url.searchParams.get("limit") || "20";
       const offsetParam = url.searchParams.get("offset") || "0";
-
-      // Validate and sanitize pagination params
-      const limit = Math.min(Math.max(1, parseInt(limitParam) || 20), 100); // 1-100
+      const limit = Math.min(Math.max(1, parseInt(limitParam) || 20), 100);
       const offset = Math.max(0, parseInt(offsetParam) || 0);
 
-      const { emails, total } = await getRecentEmails(env.EMAIL_HISTORY, limit, offset);
-      return json({ emails, total, limit, offset });
+      const result = await getTenantEmails(env.EMAIL_HISTORY, tenant.id, limit, offset);
+      return json({ ...result, limit, offset });
     }
 
-    // Search emails
-    if (url.pathname === "/emails/search" && request.method === "GET") {
-      // Sanitize search params (limit length to prevent abuse)
+    // Search tenant's emails
+    if (url.pathname === "/api/v1/emails/search" && request.method === "GET") {
       const from = (url.searchParams.get("from") || "").slice(0, 200) || undefined;
       const subject = (url.searchParams.get("subject") || "").slice(0, 200) || undefined;
       const agentId = (url.searchParams.get("agentId") || "").slice(0, 100) || undefined;
 
-      const emails = await searchEmails(env.EMAIL_HISTORY, { from, subject, agentId });
+      const emails = await searchTenantEmails(env.EMAIL_HISTORY, tenant.id, { from, subject, agentId });
       return json({ emails, count: emails.length });
     }
 
-    // Get single email by ID
-    if (url.pathname.match(/^\/emails\/[\w-]+$/) && request.method === "GET") {
-      const emailId = url.pathname.split("/")[2];
-
-      // Validate email ID format
+    // Get tenant's email by ID
+    if (url.pathname.match(/^\/api\/v1\/emails\/[\w-]+$/) && request.method === "GET") {
+      const emailId = url.pathname.split("/")[4];
       if (!emailId || !/^[\w-]+$/.test(emailId)) {
         return json({ error: "Invalid email ID format" }, 400);
       }
 
-      const record = await getEmailRecord(env.EMAIL_HISTORY, emailId);
+      const record = await getTenantEmailRecord(env.EMAIL_HISTORY, tenant.id, emailId);
       if (!record) {
         return json({ error: "Email not found" }, 404);
       }
       return json(record);
     }
 
-    // ================== RETRY QUEUE ENDPOINTS ==================
-
-    // Get retry queue stats
-    if (url.pathname === "/retry/stats" && request.method === "GET") {
-      const stats = await getQueueStats(env.RETRY_QUEUE);
+    // Get tenant's email stats
+    if (url.pathname === "/api/v1/emails/stats" && request.method === "GET") {
+      const stats = await getTenantEmailStats(env.EMAIL_HISTORY, tenant.id);
       return json(stats);
-    }
-
-    // List pending retries
-    if (url.pathname === "/retry/pending" && request.method === "GET") {
-      const items = await getRetryItems(env.RETRY_QUEUE);
-      return json({ items, count: items.length });
-    }
-
-    // List dead letter items
-    if (url.pathname === "/retry/dead" && request.method === "GET") {
-      const items = await getDeadLetterItems(env.RETRY_QUEUE);
-      return json({ items, count: items.length });
-    }
-
-    // Manually trigger retry processing (requires API key)
-    if (url.pathname === "/retry/process" && request.method === "POST") {
-      if (!verifyApiKey(request, env.API_KEY)) {
-        return unauthorizedResponse();
-      }
-
-      const stats = await processRetryQueue(env.RETRY_QUEUE, env.WEBHOOK_SIGNING_KEY);
-      return json(stats);
-    }
-
-    // ================== TEST ENDPOINTS ==================
-
-    // Test routing (simulates email routing without actual email)
-    // Requires API key since it consumes Claude API credits
-    if (url.pathname === "/test-route" && request.method === "POST") {
-      if (!verifyApiKey(request, env.API_KEY)) {
-        return unauthorizedResponse();
-      }
-
-      let body: { from?: string; subject?: string; body?: string };
-      try {
-        body = (await request.json()) as { from?: string; subject?: string; body?: string };
-      } catch {
-        return json({ error: "Invalid JSON body" }, 400);
-      }
-
-      // Sanitize and limit input sizes
-      const simulatedEmail = {
-        from: (body.from || "test@example.com").slice(0, 200),
-        to: "inbox@moperator.ai",
-        subject: (body.subject || "Test email").slice(0, 500),
-        textBody: (body.body || "").slice(0, 10000), // Limit body to 10KB
-        attachments: [],
-        receivedAt: new Date().toISOString(),
-      };
-
-      const agents = await getActiveAgents(env.AGENT_REGISTRY);
-      if (agents.length === 0) {
-        return json({ error: "No agents registered" }, 400);
-      }
-
-      const decision = await routeEmail(simulatedEmail, agents, env.ANTHROPIC_API_KEY);
-
-      return json({
-        email: simulatedEmail,
-        routing: decision,
-        availableAgents: agents.map((a) => ({ id: a.id, name: a.name })),
-      });
     }
 
     return json({ error: "Not found" }, 404);
   },
 };
 
+// ================== LEGACY ENDPOINTS (backwards compatibility) ==================
+
+async function handleLegacyEndpoints(request: Request, env: Env, url: URL): Promise<Response> {
+  // ==================== AGENT ENDPOINTS ====================
+
+  // List agents (public)
+  if (url.pathname === "/agents" && request.method === "GET") {
+    const agents = await getActiveAgents(env.AGENT_REGISTRY);
+    return json({ agents });
+  }
+
+  // Register agent (requires API key)
+  if (url.pathname === "/agents" && request.method === "POST") {
+    if (!verifyApiKey(request, env.API_KEY)) {
+      return unauthorizedResponse();
+    }
+
+    let body: Partial<Agent>;
+    try {
+      body = await request.json() as Partial<Agent>;
+    } catch {
+      return json({ error: "Invalid JSON body" }, 400);
+    }
+
+    if (!body.id || !body.name || !body.webhookUrl || !body.description) {
+      return json({ error: "Missing required fields: id, name, description, webhookUrl" }, 400);
+    }
+
+    if (!/^[a-zA-Z0-9_-]+$/.test(body.id)) {
+      return json({ error: "Invalid agent ID format" }, 400);
+    }
+
+    try {
+      new URL(body.webhookUrl);
+    } catch {
+      return json({ error: "Invalid webhookUrl format" }, 400);
+    }
+
+    const agent: Agent = {
+      id: body.id,
+      name: body.name.slice(0, 100),
+      description: body.description.slice(0, 500),
+      webhookUrl: body.webhookUrl,
+      active: body.active ?? true,
+    };
+
+    await env.AGENT_REGISTRY.put(`agent:${agent.id}`, JSON.stringify(agent));
+    return json({ agent }, 201);
+  }
+
+  // Re-enable agent (requires API key)
+  if (url.pathname.startsWith("/agents/") && url.pathname.endsWith("/enable") && request.method === "POST") {
+    if (!verifyApiKey(request, env.API_KEY)) {
+      return unauthorizedResponse();
+    }
+
+    const agentId = url.pathname.split("/")[2];
+    if (!agentId || !/^[a-zA-Z0-9_-]+$/.test(agentId)) {
+      return json({ error: "Invalid agent ID" }, 400);
+    }
+
+    const agent = await reEnableAgent(env.AGENT_REGISTRY, agentId);
+    if (!agent) {
+      return json({ error: "Agent not found" }, 404);
+    }
+
+    return json({ agent, message: "Agent re-enabled successfully" });
+  }
+
+  // Delete agent (requires API key)
+  if (url.pathname.startsWith("/agents/") && request.method === "DELETE") {
+    if (!verifyApiKey(request, env.API_KEY)) {
+      return unauthorizedResponse();
+    }
+
+    const agentId = url.pathname.split("/")[2];
+    if (!agentId || !/^[a-zA-Z0-9_-]+$/.test(agentId)) {
+      return json({ error: "Invalid agent ID" }, 400);
+    }
+
+    await env.AGENT_REGISTRY.delete(`agent:${agentId}`);
+    return json({ deleted: agentId });
+  }
+
+  // ==================== HEALTH CHECK ENDPOINTS ====================
+
+  if (url.pathname === "/health/agents" && request.method === "GET") {
+    const summary = await getHealthSummary(env.AGENT_REGISTRY);
+    return json(summary);
+  }
+
+  if (url.pathname === "/health/check" && request.method === "POST") {
+    if (!verifyApiKey(request, env.API_KEY)) {
+      return unauthorizedResponse();
+    }
+
+    const stats = await checkAllAgentsHealth(env.AGENT_REGISTRY);
+    return json(stats);
+  }
+
+  if (url.pathname.match(/^\/health\/agents\/[\w-]+$/) && request.method === "POST") {
+    if (!verifyApiKey(request, env.API_KEY)) {
+      return unauthorizedResponse();
+    }
+
+    const agentId = url.pathname.split("/")[3];
+    if (!agentId || !/^[a-zA-Z0-9_-]+$/.test(agentId)) {
+      return json({ error: "Invalid agent ID" }, 400);
+    }
+
+    const data = await env.AGENT_REGISTRY.get(`agent:${agentId}`);
+    if (!data) {
+      return json({ error: "Agent not found" }, 404);
+    }
+
+    const agent = JSON.parse(data) as AgentWithHealth;
+    const status = await checkAgentHealth(env.AGENT_REGISTRY, agent);
+    return json({ agentId, health: status });
+  }
+
+  // ==================== EMAIL HISTORY ENDPOINTS ====================
+
+  // Get email stats
+  if (url.pathname === "/emails/stats" && request.method === "GET") {
+    const stats = await getEmailStats(env.EMAIL_HISTORY);
+    return json(stats);
+  }
+
+  // List recent emails
+  if (url.pathname === "/emails" && request.method === "GET") {
+    const limitParam = url.searchParams.get("limit") || "20";
+    const offsetParam = url.searchParams.get("offset") || "0";
+    const limit = Math.min(Math.max(1, parseInt(limitParam) || 20), 100);
+    const offset = Math.max(0, parseInt(offsetParam) || 0);
+
+    const { emails, total } = await getRecentEmails(env.EMAIL_HISTORY, limit, offset);
+    return json({ emails, total, limit, offset });
+  }
+
+  // Search emails
+  if (url.pathname === "/emails/search" && request.method === "GET") {
+    const from = (url.searchParams.get("from") || "").slice(0, 200) || undefined;
+    const subject = (url.searchParams.get("subject") || "").slice(0, 200) || undefined;
+    const agentId = (url.searchParams.get("agentId") || "").slice(0, 100) || undefined;
+
+    const emails = await searchEmails(env.EMAIL_HISTORY, { from, subject, agentId });
+    return json({ emails, count: emails.length });
+  }
+
+  // Get single email by ID
+  if (url.pathname.match(/^\/emails\/[\w-]+$/) && request.method === "GET") {
+    const emailId = url.pathname.split("/")[2];
+    if (!emailId || !/^[\w-]+$/.test(emailId)) {
+      return json({ error: "Invalid email ID format" }, 400);
+    }
+
+    const record = await getEmailRecord(env.EMAIL_HISTORY, emailId);
+    if (!record) {
+      return json({ error: "Email not found" }, 404);
+    }
+    return json(record);
+  }
+
+  // ==================== RETRY QUEUE ENDPOINTS ====================
+
+  // Get retry queue stats
+  if (url.pathname === "/retry/stats" && request.method === "GET") {
+    const stats = await getQueueStats(env.RETRY_QUEUE);
+    return json(stats);
+  }
+
+  // List pending retries
+  if (url.pathname === "/retry/pending" && request.method === "GET") {
+    const items = await getRetryItems(env.RETRY_QUEUE);
+    return json({ items, count: items.length });
+  }
+
+  // List dead letter items
+  if (url.pathname === "/retry/dead" && request.method === "GET") {
+    const items = await getDeadLetterItems(env.RETRY_QUEUE);
+    return json({ items, count: items.length });
+  }
+
+  // Manually trigger retry processing (requires API key)
+  if (url.pathname === "/retry/process" && request.method === "POST") {
+    if (!verifyApiKey(request, env.API_KEY)) {
+      return unauthorizedResponse();
+    }
+
+    const stats = await processRetryQueue(env.RETRY_QUEUE, env.WEBHOOK_SIGNING_KEY);
+    return json(stats);
+  }
+
+  // ==================== TEST ENDPOINTS ====================
+
+  // Test routing (requires API key since it consumes Claude API credits)
+  if (url.pathname === "/test-route" && request.method === "POST") {
+    if (!verifyApiKey(request, env.API_KEY)) {
+      return unauthorizedResponse();
+    }
+
+    let body: { from?: string; subject?: string; body?: string };
+    try {
+      body = await request.json() as { from?: string; subject?: string; body?: string };
+    } catch {
+      return json({ error: "Invalid JSON body" }, 400);
+    }
+
+    const simulatedEmail = {
+      from: (body.from || "test@example.com").slice(0, 200),
+      to: "inbox@moperator.ai",
+      subject: (body.subject || "Test email").slice(0, 500),
+      textBody: (body.body || "").slice(0, 10000),
+      attachments: [],
+      receivedAt: new Date().toISOString(),
+    };
+
+    const agents = await getActiveAgents(env.AGENT_REGISTRY);
+    if (agents.length === 0) {
+      return json({ error: "No agents registered" }, 400);
+    }
+
+    const decision = await routeEmail(simulatedEmail, agents, env.ANTHROPIC_API_KEY);
+
+    return json({
+      email: simulatedEmail,
+      routing: decision,
+      availableAgents: agents.map((a) => ({ id: a.id, name: a.name })),
+    });
+  }
+
+  return json({ error: "Not found" }, 404);
+}
+
+// ================== TENANT-SCOPED DATA ACCESS ==================
+
+async function getTenantAgents(kv: KVNamespace, tenantId: string): Promise<Agent[]> {
+  const prefix = tenantKey(tenantId, "agent") + ":";
+  const list = await kv.list({ prefix });
+  const agents: Agent[] = [];
+
+  for (const key of list.keys) {
+    const data = await kv.get(key.name);
+    if (data) {
+      const agent = JSON.parse(data) as Agent;
+      if (agent.active) {
+        agents.push(agent);
+      }
+    }
+  }
+
+  return agents;
+}
+
+async function saveTenantEmailRecord(
+  kv: KVNamespace,
+  tenantId: string,
+  email: any,
+  decision: any,
+  result: any,
+  duration: number
+): Promise<void> {
+  const id = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+  const record = {
+    id,
+    email,
+    routingDecision: decision,
+    dispatchResult: result,
+    agentId: decision.agentId,
+    processedAt: new Date().toISOString(),
+    processingTimeMs: duration,
+  };
+
+  const key = tenantKey(tenantId, "email", id);
+  await kv.put(key, JSON.stringify(record));
+
+  // Update index
+  const indexKey = tenantKey(tenantId, "email:index");
+  const indexData = await kv.get(indexKey);
+  const index: string[] = indexData ? JSON.parse(indexData) : [];
+  index.unshift(id);
+  if (index.length > 1000) index.pop();
+  await kv.put(indexKey, JSON.stringify(index));
+}
+
+async function getTenantEmails(
+  kv: KVNamespace,
+  tenantId: string,
+  limit: number,
+  offset: number
+): Promise<{ emails: any[]; total: number }> {
+  const indexKey = tenantKey(tenantId, "email:index");
+  const indexData = await kv.get(indexKey);
+  const index: string[] = indexData ? JSON.parse(indexData) : [];
+
+  const total = index.length;
+  const ids = index.slice(offset, offset + limit);
+
+  const emails: any[] = [];
+  for (const id of ids) {
+    const data = await kv.get(tenantKey(tenantId, "email", id));
+    if (data) {
+      emails.push(JSON.parse(data));
+    }
+  }
+
+  return { emails, total };
+}
+
+async function getTenantEmailRecord(
+  kv: KVNamespace,
+  tenantId: string,
+  emailId: string
+): Promise<any | null> {
+  const data = await kv.get(tenantKey(tenantId, "email", emailId));
+  return data ? JSON.parse(data) : null;
+}
+
+async function searchTenantEmails(
+  kv: KVNamespace,
+  tenantId: string,
+  query: { from?: string; subject?: string; agentId?: string }
+): Promise<any[]> {
+  const { emails } = await getTenantEmails(kv, tenantId, 100, 0);
+
+  return emails.filter((record) => {
+    if (query.from && !record.email.from.toLowerCase().includes(query.from.toLowerCase())) {
+      return false;
+    }
+    if (query.subject && !record.email.subject.toLowerCase().includes(query.subject.toLowerCase())) {
+      return false;
+    }
+    if (query.agentId && record.agentId !== query.agentId) {
+      return false;
+    }
+    return true;
+  });
+}
+
+async function getTenantEmailStats(
+  kv: KVNamespace,
+  tenantId: string
+): Promise<{ total: number; successful: number; failed: number; avgProcessingTimeMs: number }> {
+  const { emails } = await getTenantEmails(kv, tenantId, 100, 0);
+
+  const successful = emails.filter((e) => e.dispatchResult.success).length;
+  const failed = emails.filter((e) => !e.dispatchResult.success).length;
+  const avgProcessingTimeMs =
+    emails.length > 0
+      ? Math.round(emails.reduce((sum, e) => sum + e.processingTimeMs, 0) / emails.length)
+      : 0;
+
+  return { total: emails.length, successful, failed, avgProcessingTimeMs };
+}
+
+// Legacy: Get all active agents (not tenant-scoped)
 async function getActiveAgents(kv: KVNamespace): Promise<Agent[]> {
   const list = await kv.list({ prefix: "agent:" });
   const agents: Agent[] = [];
@@ -330,6 +845,9 @@ async function getActiveAgents(kv: KVNamespace): Promise<Agent[]> {
 function json(data: unknown, status = 200): Response {
   return new Response(JSON.stringify(data, null, 2), {
     status,
-    headers: { "Content-Type": "application/json" },
+    headers: {
+      "Content-Type": "application/json",
+      "Access-Control-Allow-Origin": "*",
+    },
   });
 }

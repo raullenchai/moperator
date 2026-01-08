@@ -10,13 +10,14 @@ export async function addToRetryQueue(
   agentId: string,
   webhookUrl: string,
   routingReason: string,
-  error: string
+  error: string,
+  tenantId?: string // Optional tenant scoping
 ): Promise<string> {
   const id = generateId();
   const now = new Date();
   const nextAttempt = new Date(now.getTime() + BASE_DELAY_MS);
 
-  const item: RetryItem = {
+  const item: RetryItem & { tenantId?: string } = {
     id,
     email,
     agentId,
@@ -30,6 +31,11 @@ export async function addToRetryQueue(
     createdAt: now.toISOString(),
   };
 
+  // Add tenant scoping if provided
+  if (tenantId) {
+    item.tenantId = tenantId;
+  }
+
   await kv.put(`retry:${id}`, JSON.stringify(item), {
     expirationTtl: 60 * 60 * 24 * 7, // 7 days
   });
@@ -37,7 +43,7 @@ export async function addToRetryQueue(
   // Also add to index for listing
   await addToIndex(kv, id);
 
-  console.log(`[RETRY] Added to queue: ${id} (attempt 1/${MAX_ATTEMPTS})`);
+  console.log(`[RETRY] Added to queue: ${id} (attempt 1/${MAX_ATTEMPTS})${tenantId ? ` for tenant ${tenantId}` : ""}`);
   return id;
 }
 

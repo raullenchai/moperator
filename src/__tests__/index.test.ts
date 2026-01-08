@@ -66,7 +66,7 @@ describe("API endpoints", () => {
 
       expect(response.status).toBe(200);
       const body = await response.json();
-      expect(body).toEqual({ status: "ok", service: "moperator" });
+      expect(body).toEqual({ status: "ok", service: "moperator", version: "2.0.0" });
     });
   });
 
@@ -249,16 +249,18 @@ describe("API endpoints", () => {
     });
   });
 
-  describe("404 handling", () => {
-    it("returns 404 for unknown routes", async () => {
+  describe("authentication for unknown routes", () => {
+    it("returns 401 for unknown routes without auth", async () => {
+      // Unknown routes fall into the authenticated tenant section
+      // and require a valid API key
       const request = new Request("http://localhost/unknown");
       const ctx = createExecutionContext();
       const response = await worker.fetch(request, env, ctx);
       await waitOnExecutionContext(ctx);
 
-      expect(response.status).toBe(404);
+      expect(response.status).toBe(401);
       const body = (await response.json()) as ErrorResponse;
-      expect(body.error).toBe("Not found");
+      expect(body.error).toBe("Authorization required. Use Bearer token with your API key.");
     });
   });
 });

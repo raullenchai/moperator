@@ -4,9 +4,9 @@
 
 # Moperator
 
-> The AI Mail Gateway
+> Email for AI (and non-human Intelligence)
 
-A headless, serverless email gateway that routes incoming emails to backend AI agents using Claude for intelligent intent classification.
+The first email infrastructure built for AI agents, LLMs, and autonomous systems. Moperator routes incoming emails to your AI backends using Claude for intelligent intent classification — because your agents deserve their own inbox.
 
 ```
 ┌─────────────┐     ┌─────────────┐     ┌─────────────┐     ┌─────────────┐
@@ -193,6 +193,15 @@ npm run deploy
 | `GET` | `/retry/dead` | List dead letter items (failed after max retries) |
 | `POST` | `/retry/process` | Manually trigger retry processing |
 
+### Health Checks
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| `GET` | `/health/agents` | Get health status for all agents |
+| `POST` | `/health/check` | Trigger health check for all agents |
+| `POST` | `/health/agents/:id` | Check health of specific agent |
+| `POST` | `/agents/:id/enable` | Re-enable a disabled agent |
+
 ### Health Check
 
 ```bash
@@ -313,6 +322,54 @@ curl https://moperator.your-subdomain.workers.dev/retry/dead
 # Manually trigger retry processing
 curl -X POST https://moperator.your-subdomain.workers.dev/retry/process
 ```
+
+### Health Checks
+
+```bash
+# Get health status for all agents
+curl https://moperator.your-subdomain.workers.dev/health/agents
+```
+
+```json
+{
+  "agents": [
+    {
+      "id": "finance-bot",
+      "name": "FinanceBot",
+      "active": true,
+      "health": {
+        "healthy": true,
+        "lastCheck": "2024-01-15T10:30:00.000Z",
+        "lastSuccess": "2024-01-15T10:30:00.000Z",
+        "consecutiveFailures": 0,
+        "responseTimeMs": 234
+      }
+    }
+  ],
+  "summary": {
+    "total": 2,
+    "active": 2,
+    "healthy": 2,
+    "unhealthy": 0
+  }
+}
+```
+
+```bash
+# Manually trigger health check for all agents
+curl -X POST https://moperator.your-subdomain.workers.dev/health/check \
+  -H "Authorization: Bearer your-api-key"
+
+# Check health of a specific agent
+curl -X POST https://moperator.your-subdomain.workers.dev/health/agents/finance-bot \
+  -H "Authorization: Bearer your-api-key"
+
+# Re-enable a disabled agent (after fixing the webhook)
+curl -X POST https://moperator.your-subdomain.workers.dev/agents/finance-bot/enable \
+  -H "Authorization: Bearer your-api-key"
+```
+
+**Auto-disable behavior:** Agents are automatically disabled after 3 consecutive health check failures. Use the `/agents/:id/enable` endpoint to re-enable them after fixing the issue.
 
 ## Webhook Payload
 

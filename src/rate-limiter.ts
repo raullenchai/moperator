@@ -1,5 +1,7 @@
 // Simple rate limiter using KV storage
-// Uses sliding window approach with per-IP tracking
+// Uses sliding window approach with per-IP or per-tenant tracking
+
+import type { Tenant, TenantSettings } from "./tenant";
 
 interface RateLimitConfig {
   windowMs: number;      // Time window in milliseconds
@@ -20,6 +22,14 @@ const STRICT_CONFIG: RateLimitConfig = {
   windowMs: 60 * 1000,  // 1 minute
   maxRequests: 10,       // 10 requests per minute (for write operations)
 };
+
+// Per-tenant rate limit config (uses tenant settings)
+function getTenantConfig(tenant: Tenant): RateLimitConfig {
+  return {
+    windowMs: 60 * 1000,  // 1 minute
+    maxRequests: tenant.settings.rateLimitPerMinute,
+  };
+}
 
 export async function checkRateLimit(
   kv: KVNamespace,
@@ -112,5 +122,14 @@ export function rateLimitResponse(resetAt: number): Response {
   );
 }
 
-export { DEFAULT_CONFIG, STRICT_CONFIG };
+// Check rate limit for authenticated tenant
+export async function checkTenantRateLimit(
+  kv: KVNamespace,
+  tenant: Tenant
+): Promise<{ allowed: boolean; remaining: number; resetAt: number }> {
+  const config = getTenantConfig(tenant);
+  return checkRateLimit(kv, `tenant:${tenant.id}`, config);
+}
+
+export { DEFAULT_CONFIG, STRICT_CONFIG, getTenantConfig };
 export type { RateLimitConfig };

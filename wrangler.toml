@@ -23,13 +23,20 @@ id = "b6550b26572e462bad5014410f18684f"
 binding = "RATE_LIMIT"
 id = "73009adf28f0493885e23201fb0942f2"
 
-# Cron trigger for retry processing (every 5 minutes)
+# KV namespace for multi-tenant user data
+[[kv_namespaces]]
+binding = "TENANTS"
+id = "c17b49885c324cefaf005ddfdf1094b6"
+
+# Cron trigger for retry processing and health checks (every 5 minutes)
 [triggers]
 crons = ["*/5 * * * *"]
 
 # Secrets (set via wrangler secret put):
 # - ANTHROPIC_API_KEY: Claude API key
 # - WEBHOOK_SIGNING_KEY: HMAC signing key for webhook payloads
+# - API_KEY: (Optional) Legacy API key for system-wide agent management
+# - ADMIN_SECRET: Admin secret for tenant management endpoints
 
 # Email routing (configure in Cloudflare dashboard)
 # Routes: *@moperator.work -> this worker

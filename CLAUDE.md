@@ -1,9 +1,10 @@
-# Project Context: Moperator (The AI Mail Gateway)
+# Project Context: Moperator — Email for AI
 
 ## 1. Project Identity
 **Codename:** Moperator
+**Tagline:** Email for AI (and non-human Intelligence)
 **Vibe:** Cyberpunk / Tech-Noir / "The Mail Operator".
-**Mission:** A headless, serverless event gateway that connects the chaotic "Sprawl" of global email traffic to a disciplined network of backend AI Agents. It acts as the intelligent switchboard, ingesting raw data, understanding intent, and dispatching tasks to the correct specialist.
+**Mission:** The first email infrastructure built for AI agents, LLMs, and autonomous systems. Moperator connects the chaotic "Sprawl" of global email traffic to a disciplined network of backend AI Agents — because your agents deserve their own inbox. It acts as the intelligent switchboard, ingesting raw data, understanding intent, and dispatching tasks to the correct specialist.
 
 ## 2. Core Architecture
 The system is built on an **Event-Driven Serverless Architecture** deployed to the Edge.

@@ -4,9 +4,11 @@ export interface Env {
   EMAIL_HISTORY: KVNamespace;
   RETRY_QUEUE: KVNamespace;
   RATE_LIMIT: KVNamespace;
+  TENANTS: KVNamespace;        // Multi-tenant user data
   ANTHROPIC_API_KEY: string;
   WEBHOOK_SIGNING_KEY: string;
-  API_KEY?: string; // Optional API key for protecting management endpoints
+  API_KEY?: string;            // Admin API key for system management
+  ADMIN_SECRET?: string;       // Admin secret for tenant management
 }
 
 // Agent registered in KV
