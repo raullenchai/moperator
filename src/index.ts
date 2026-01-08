@@ -496,15 +496,17 @@ export default {
       return json({ deleted: agentId });
     }
 
-    // List tenant's emails
+    // List tenant's emails (compact by default for ChatGPT compatibility)
     if (url.pathname === "/api/v1/emails" && request.method === "GET") {
-      const limitParam = url.searchParams.get("limit") || "20";
+      const limitParam = url.searchParams.get("limit") || "10";
       const offsetParam = url.searchParams.get("offset") || "0";
-      const limit = Math.min(Math.max(1, parseInt(limitParam) || 20), 100);
+      const limit = Math.min(Math.max(1, parseInt(limitParam) || 10), 50);
       const offset = Math.max(0, parseInt(offsetParam) || 0);
 
       const result = await getTenantEmails(env.EMAIL_HISTORY, tenant.id, limit, offset);
-      return json({ ...result, limit, offset });
+      // Return compact summaries to avoid response size limits
+      const compactEmails = result.emails.map(compactEmailSummary);
+      return json({ emails: compactEmails, total: result.total, limit, offset });
     }
 
     // Search tenant's emails
@@ -514,7 +516,9 @@ export default {
       const agentId = (url.searchParams.get("agentId") || "").slice(0, 100) || undefined;
 
       const emails = await searchTenantEmails(env.EMAIL_HISTORY, tenant.id, { from, subject, agentId });
-      return json({ emails, count: emails.length });
+      // Return compact summaries
+      const compactEmails = emails.map(compactEmailSummary);
+      return json({ emails: compactEmails, count: compactEmails.length });
     }
 
     // Get tenant's email by ID
@@ -946,6 +950,19 @@ async function getActiveAgents(kv: KVNamespace): Promise<Agent[]> {
   }
 
   return agents;
+}
+
+// Create compact email summary for API responses (avoids ChatGPT response size limits)
+function compactEmailSummary(record: any): any {
+  return {
+    id: record.id,
+    from: record.email?.from || "",
+    subject: record.email?.subject || "",
+    preview: (record.email?.textBody || "").slice(0, 200).replace(/\s+/g, " ").trim(),
+    receivedAt: record.email?.receivedAt || record.processedAt,
+    agentId: record.agentId,
+    success: record.dispatchResult?.success ?? true,
+  };
 }
 
 function json(data: unknown, status = 200): Response {
