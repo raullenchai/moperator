@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="moperator.png" alt="Moperator Logo" width="400">
+</p>
+
 # Moperator
 
 > The AI Mail Gateway
