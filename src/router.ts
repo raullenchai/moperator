@@ -43,7 +43,7 @@ export async function routeEmail(
   return parseRoutingResponse(text, agents);
 }
 
-function buildRoutingPrompt(email: ParsedEmail, agents: Agent[]): string {
+export function buildRoutingPrompt(email: ParsedEmail, agents: Agent[]): string {
   const agentList = agents
     .map((a) => `- ${a.id}: ${a.name} - ${a.description}`)
     .join("\n");
@@ -62,7 +62,7 @@ Respond with ONLY a JSON object in this exact format, no other text:
 {"agentId": "the_agent_id", "reason": "brief explanation"}`;
 }
 
-function parseRoutingResponse(text: string, agents: Agent[]): RoutingDecision {
+export function parseRoutingResponse(text: string, agents: Agent[]): RoutingDecision {
   try {
     const jsonMatch = text.match(/\{[\s\S]*\}/);
     if (jsonMatch) {

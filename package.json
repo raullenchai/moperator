@@ -5,11 +5,17 @@
   "scripts": {
     "dev": "wrangler dev",
     "deploy": "wrangler deploy",
-    "types": "wrangler types"
+    "types": "wrangler types",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:coverage": "vitest run --coverage"
   },
   "devDependencies": {
+    "@cloudflare/vitest-pool-workers": "^0.5.30",
     "@cloudflare/workers-types": "^4.20241127.0",
+    "@vitest/coverage-istanbul": "^2.1.8",
     "typescript": "^5.7.2",
+    "vitest": "^2.1.8",
     "wrangler": "^3.93.0"
   },
   "dependencies": {

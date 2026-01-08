@@ -48,7 +48,7 @@ export async function dispatchToAgent(
   }
 }
 
-async function signPayload(payload: string, secret: string): Promise<string> {
+export async function signPayload(payload: string, secret: string): Promise<string> {
   const encoder = new TextEncoder();
   const key = await crypto.subtle.importKey(
     "raw",
