@@ -36,6 +36,42 @@
   <!-- Canonical -->
   <link rel="canonical" href="https://moperator.work/">
 
+  <!-- JSON-LD Schema for Software Application -->
+  <script type="application/ld+json">
+  {
+    "@context": "https://schema.org",
+    "@type": "SoftwareApplication",
+    "name": "Moperator",
+    "description": "The first email infrastructure built for AI agents, LLMs, and autonomous systems. Give your AI a real email address.",
+    "url": "https://moperator.work",
+    "applicationCategory": "DeveloperApplication",
+    "operatingSystem": "Cloud",
+    "offers": {
+      "@type": "Offer",
+      "price": "0",
+      "priceCurrency": "USD"
+    },
+    "featureList": [
+      "REST API for email access",
+      "MCP integration for Claude Desktop",
+      "OpenAPI Actions for ChatGPT",
+      "AI-powered email labeling with Claude",
+      "Webhook notifications",
+      "Read/unread status tracking",
+      "Label-based email filtering"
+    ],
+    "screenshot": "https://moperator.work/moperator.png",
+    "softwareHelp": {
+      "@type": "WebPage",
+      "url": "https://moperator.work/docs"
+    },
+    "author": {
+      "@type": "Organization",
+      "name": "Moperator"
+    }
+  }
+  </script>
+
   <script src="https://cdn.tailwindcss.com"></script>
   <script>
     tailwind.config = {
@@ -245,6 +281,71 @@
       </div>
     </section>
 
+    <!-- Quickstart -->
+    <section class="px-8 py-16 bg-white border-t border-slate-200">
+      <div class="max-w-4xl mx-auto">
+        <h2 class="text-2xl font-bold text-slate-800 mb-2 text-center">Quickstart</h2>
+        <p class="text-slate-600 mb-8 text-center">Get your AI reading emails in under 5 minutes</p>
+
+        <div class="space-y-8">
+          <!-- Step 1: Sign Up -->
+          <div>
+            <h3 class="font-semibold text-slate-800 mb-3 flex items-center gap-2">
+              <span class="w-6 h-6 rounded-full bg-primary text-white text-sm flex items-center justify-center">1</span>
+              Create an account
+            </h3>
+            <p class="text-slate-600 ml-8 mb-2">Sign up at <a href="https://app.moperator.work" class="text-primary hover:underline">app.moperator.work</a> to get your API key and email address.</p>
+          </div>
+
+          <!-- Step 2: Query Emails -->
+          <div>
+            <h3 class="font-semibold text-slate-800 mb-3 flex items-center gap-2">
+              <span class="w-6 h-6 rounded-full bg-primary text-white text-sm flex items-center justify-center">2</span>
+              Query emails via REST API
+            </h3>
+            <div class="ml-8 bg-slate-900 rounded-lg p-4 overflow-x-auto">
+              <pre class="text-sm text-slate-300"><code><span class="text-green-400"># List all emails</span>
+curl https://api.moperator.work/api/v1/emails \
+  -H "Authorization: Bearer mop_yourkey"
+
+<span class="text-green-400"># Filter by label</span>
+curl "https://api.moperator.work/api/v1/emails?labels=finance" \
+  -H "Authorization: Bearer mop_yourkey"
+
+<span class="text-green-400"># Get unread emails only</span>
+curl "https://api.moperator.work/api/v1/emails?status=unread" \
+  -H "Authorization: Bearer mop_yourkey"</code></pre>
+            </div>
+          </div>
+
+          <!-- Step 3: Claude Desktop -->
+          <div>
+            <h3 class="font-semibold text-slate-800 mb-3 flex items-center gap-2">
+              <span class="w-6 h-6 rounded-full bg-primary text-white text-sm flex items-center justify-center">3</span>
+              Or connect Claude Desktop via MCP
+            </h3>
+            <p class="text-slate-600 ml-8 mb-2">Add to your <code class="bg-slate-100 px-1.5 py-0.5 rounded text-sm">claude_desktop_config.json</code>:</p>
+            <div class="ml-8 bg-slate-900 rounded-lg p-4 overflow-x-auto">
+              <pre class="text-sm text-slate-300"><code>{
+  "mcpServers": {
+    "moperator": {
+      "command": "npx",
+      "args": ["-y", "mcp-remote", "https://api.moperator.work/mcp",
+               "--header", "Authorization: Bearer mop_yourkey"]
+    }
+  }
+}</code></pre>
+            </div>
+            <p class="text-slate-500 text-sm ml-8 mt-2">Then ask Claude: "Check my email" or "Do I have any finance emails?"</p>
+          </div>
+        </div>
+
+        <div class="mt-8 text-center">
+          <a href="/docs" class="text-primary hover:underline font-medium">View full documentation →</a>
+        </div>
+      </div>
+    </section>
+
     <!-- Final CTA -->
     <section class="px-8 py-16 bg-gradient-to-br from-primary to-purple-600">
       <div class="max-w-4xl mx-auto text-center">
@@ -264,6 +365,7 @@
           <span class="text-slate-300 font-medium">Moperator</span>
         </div>
         <div class="flex gap-6 text-sm">
+          <a href="/docs" class="hover:text-white transition">Docs</a>
           <a href="https://github.com/raullenchai/moperator" class="hover:text-white transition">GitHub</a>
           <a href="https://app.moperator.work" class="hover:text-white transition">Dashboard</a>
         </div>

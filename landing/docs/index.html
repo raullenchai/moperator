@@ -1,0 +1,532 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+  <!-- Primary Meta Tags -->
+  <title>Documentation - Moperator | Email API for AI Agents</title>
+  <meta name="title" content="Documentation - Moperator | Email API for AI Agents">
+  <meta name="description" content="Complete documentation for Moperator email API. REST API reference, MCP integration, webhooks, Python SDK examples, and more.">
+  <meta name="keywords" content="Moperator docs, email API documentation, AI email API, MCP server, Claude MCP, ChatGPT OpenAPI, webhook integration, REST API, JSON API, Python email SDK">
+  <meta name="author" content="Moperator">
+  <meta name="robots" content="index, follow">
+
+  <!-- Favicon -->
+  <link rel="icon" type="image/svg+xml" href="../logo.svg">
+
+  <!-- Theme Color -->
+  <meta name="theme-color" content="#6366f1">
+
+  <!-- Open Graph -->
+  <meta property="og:type" content="website">
+  <meta property="og:url" content="https://moperator.work/docs">
+  <meta property="og:title" content="Documentation - Moperator">
+  <meta property="og:description" content="Complete documentation for Moperator email API for AI agents.">
+
+  <!-- Canonical -->
+  <link rel="canonical" href="https://moperator.work/docs">
+
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          colors: {
+            primary: '#6366f1',
+            dark: '#0f172a',
+          }
+        }
+      }
+    }
+  </script>
+  <style>
+    html { scroll-behavior: smooth; }
+    .prose pre { margin: 0; }
+    .prose code { font-size: 0.875rem; }
+  </style>
+</head>
+<body class="bg-slate-50 min-h-screen">
+
+  <!-- Header -->
+  <header class="bg-white border-b border-slate-200 sticky top-0 z-50">
+    <div class="max-w-6xl mx-auto px-8 py-4 flex items-center justify-between">
+      <a href="/" class="flex items-center gap-3">
+        <img src="../logo.svg" alt="Moperator" class="h-8">
+        <span class="text-lg font-bold text-slate-800">Moperator</span>
+        <span class="text-slate-400 font-medium">Docs</span>
+      </a>
+      <div class="flex items-center gap-4">
+        <a href="https://github.com/raullenchai/moperator" class="text-slate-600 hover:text-slate-900 transition text-sm">GitHub</a>
+        <a href="https://app.moperator.work" class="px-4 py-2 bg-primary text-white font-medium rounded-lg hover:bg-primary/90 transition text-sm">
+          Get Started
+        </a>
+      </div>
+    </div>
+  </header>
+
+  <div class="max-w-6xl mx-auto px-8 py-12 flex gap-12">
+
+    <!-- Sidebar Navigation -->
+    <nav class="w-56 shrink-0 hidden lg:block">
+      <div class="sticky top-24 space-y-6">
+        <div>
+          <h4 class="font-semibold text-slate-900 mb-2">Getting Started</h4>
+          <ul class="space-y-1 text-sm">
+            <li><a href="#introduction" class="text-slate-600 hover:text-primary">Introduction</a></li>
+            <li><a href="#quickstart" class="text-slate-600 hover:text-primary">Quickstart</a></li>
+            <li><a href="#authentication" class="text-slate-600 hover:text-primary">Authentication</a></li>
+          </ul>
+        </div>
+        <div>
+          <h4 class="font-semibold text-slate-900 mb-2">REST API</h4>
+          <ul class="space-y-1 text-sm">
+            <li><a href="#list-emails" class="text-slate-600 hover:text-primary">List Emails</a></li>
+            <li><a href="#get-email" class="text-slate-600 hover:text-primary">Get Email</a></li>
+            <li><a href="#update-status" class="text-slate-600 hover:text-primary">Update Status</a></li>
+            <li><a href="#search-emails" class="text-slate-600 hover:text-primary">Search Emails</a></li>
+            <li><a href="#labels" class="text-slate-600 hover:text-primary">Labels</a></li>
+          </ul>
+        </div>
+        <div>
+          <h4 class="font-semibold text-slate-900 mb-2">Integrations</h4>
+          <ul class="space-y-1 text-sm">
+            <li><a href="#mcp" class="text-slate-600 hover:text-primary">Claude Desktop (MCP)</a></li>
+            <li><a href="#openapi" class="text-slate-600 hover:text-primary">ChatGPT (OpenAPI)</a></li>
+            <li><a href="#webhooks" class="text-slate-600 hover:text-primary">Webhooks</a></li>
+          </ul>
+        </div>
+        <div>
+          <h4 class="font-semibold text-slate-900 mb-2">Examples</h4>
+          <ul class="space-y-1 text-sm">
+            <li><a href="#python" class="text-slate-600 hover:text-primary">Python</a></li>
+            <li><a href="#javascript" class="text-slate-600 hover:text-primary">JavaScript / Node.js</a></li>
+          </ul>
+        </div>
+      </div>
+    </nav>
+
+    <!-- Main Content -->
+    <main class="flex-1 min-w-0">
+      <div class="prose prose-slate max-w-none">
+
+        <!-- Introduction -->
+        <section id="introduction" class="mb-16">
+          <h1 class="text-3xl font-bold text-slate-900 mb-4">Moperator Documentation</h1>
+          <p class="text-lg text-slate-600 mb-6">
+            Moperator is email infrastructure for AI agents. It provides a REST API, MCP server, and webhooks
+            to let your AI assistants send and receive email.
+          </p>
+          <div class="bg-primary/5 border border-primary/20 rounded-lg p-4">
+            <p class="text-slate-700 m-0">
+              <strong>Base URL:</strong> <code class="bg-white px-2 py-0.5 rounded">https://api.moperator.work</code>
+            </p>
+          </div>
+        </section>
+
+        <!-- Quickstart -->
+        <section id="quickstart" class="mb-16">
+          <h2 class="text-2xl font-bold text-slate-900 mb-4">Quickstart</h2>
+          <ol class="space-y-4 text-slate-600">
+            <li><strong>1. Sign up</strong> at <a href="https://app.moperator.work" class="text-primary hover:underline">app.moperator.work</a></li>
+            <li><strong>2. Get your API key</strong> from the dashboard (format: <code>mop_xxx_yyy</code>)</li>
+            <li><strong>3. Your email address</strong> is <code>yourname@moperator.work</code></li>
+            <li><strong>4. Query emails</strong> using the REST API or connect via MCP</li>
+          </ol>
+        </section>
+
+        <!-- Authentication -->
+        <section id="authentication" class="mb-16">
+          <h2 class="text-2xl font-bold text-slate-900 mb-4">Authentication</h2>
+          <p class="text-slate-600 mb-4">
+            All API requests require a Bearer token in the Authorization header:
+          </p>
+          <div class="bg-slate-900 rounded-lg p-4 overflow-x-auto">
+            <pre class="text-sm text-slate-300"><code>Authorization: Bearer mop_yourtenantid_yoursecret</code></pre>
+          </div>
+          <p class="text-slate-600 mt-4">
+            Your API key is available in the <a href="https://app.moperator.work" class="text-primary hover:underline">dashboard</a> after signing up.
+          </p>
+        </section>
+
+        <!-- List Emails -->
+        <section id="list-emails" class="mb-16">
+          <h2 class="text-2xl font-bold text-slate-900 mb-4">List Emails</h2>
+          <p class="text-slate-600 mb-2"><code class="bg-slate-100 px-2 py-0.5 rounded">GET /api/v1/emails</code></p>
+          <p class="text-slate-600 mb-4">Retrieve a list of emails with optional filtering.</p>
+
+          <h4 class="font-semibold text-slate-800 mt-6 mb-2">Query Parameters</h4>
+          <table class="w-full text-sm">
+            <thead>
+              <tr class="border-b border-slate-200">
+                <th class="text-left py-2 font-semibold text-slate-700">Parameter</th>
+                <th class="text-left py-2 font-semibold text-slate-700">Type</th>
+                <th class="text-left py-2 font-semibold text-slate-700">Description</th>
+              </tr>
+            </thead>
+            <tbody class="text-slate-600">
+              <tr class="border-b border-slate-100">
+                <td class="py-2"><code>labels</code></td>
+                <td class="py-2">string</td>
+                <td class="py-2">Filter by label (comma-separated for multiple)</td>
+              </tr>
+              <tr class="border-b border-slate-100">
+                <td class="py-2"><code>status</code></td>
+                <td class="py-2">string</td>
+                <td class="py-2"><code>unread</code> or <code>read</code></td>
+              </tr>
+              <tr class="border-b border-slate-100">
+                <td class="py-2"><code>limit</code></td>
+                <td class="py-2">number</td>
+                <td class="py-2">Max emails to return (default: 20)</td>
+              </tr>
+              <tr class="border-b border-slate-100">
+                <td class="py-2"><code>offset</code></td>
+                <td class="py-2">number</td>
+                <td class="py-2">Pagination offset</td>
+              </tr>
+            </tbody>
+          </table>
+
+          <h4 class="font-semibold text-slate-800 mt-6 mb-2">Example Request</h4>
+          <div class="bg-slate-900 rounded-lg p-4 overflow-x-auto">
+            <pre class="text-sm text-slate-300"><code>curl "https://api.moperator.work/api/v1/emails?status=unread&labels=finance" \
+  -H "Authorization: Bearer mop_yourkey"</code></pre>
+          </div>
+
+          <h4 class="font-semibold text-slate-800 mt-6 mb-2">Response</h4>
+          <div class="bg-slate-900 rounded-lg p-4 overflow-x-auto">
+            <pre class="text-sm text-slate-300"><code>{
+  "emails": [
+    {
+      "id": "1704067200000-abc123",
+      "email": {
+        "from": "billing@example.com",
+        "to": "yourbot@moperator.work",
+        "subject": "Invoice #1234",
+        "textBody": "Please find attached...",
+        "receivedAt": "2024-01-01T00:00:00.000Z"
+      },
+      "labels": ["finance", "important"],
+      "status": "unread",
+      "processedAt": "2024-01-01T00:00:01.000Z"
+    }
+  ],
+  "total": 1,
+  "unreadCount": 1
+}</code></pre>
+          </div>
+        </section>
+
+        <!-- Get Email -->
+        <section id="get-email" class="mb-16">
+          <h2 class="text-2xl font-bold text-slate-900 mb-4">Get Email</h2>
+          <p class="text-slate-600 mb-2"><code class="bg-slate-100 px-2 py-0.5 rounded">GET /api/v1/emails/:id</code></p>
+          <p class="text-slate-600 mb-4">Retrieve a single email by ID.</p>
+
+          <h4 class="font-semibold text-slate-800 mt-6 mb-2">Query Parameters</h4>
+          <table class="w-full text-sm">
+            <tbody class="text-slate-600">
+              <tr class="border-b border-slate-100">
+                <td class="py-2"><code>markRead</code></td>
+                <td class="py-2">boolean</td>
+                <td class="py-2">Set to <code>true</code> to automatically mark as read</td>
+              </tr>
+            </tbody>
+          </table>
+
+          <h4 class="font-semibold text-slate-800 mt-6 mb-2">Example</h4>
+          <div class="bg-slate-900 rounded-lg p-4 overflow-x-auto">
+            <pre class="text-sm text-slate-300"><code># Get email without marking as read
+curl "https://api.moperator.work/api/v1/emails/1704067200000-abc123" \
+  -H "Authorization: Bearer mop_yourkey"
+
+# Get email and mark as read
+curl "https://api.moperator.work/api/v1/emails/1704067200000-abc123?markRead=true" \
+  -H "Authorization: Bearer mop_yourkey"</code></pre>
+          </div>
+        </section>
+
+        <!-- Update Status -->
+        <section id="update-status" class="mb-16">
+          <h2 class="text-2xl font-bold text-slate-900 mb-4">Update Email Status</h2>
+          <p class="text-slate-600 mb-2"><code class="bg-slate-100 px-2 py-0.5 rounded">PATCH /api/v1/emails/:id</code></p>
+          <p class="text-slate-600 mb-4">Update the read/unread status of an email.</p>
+
+          <h4 class="font-semibold text-slate-800 mt-6 mb-2">Request Body</h4>
+          <div class="bg-slate-900 rounded-lg p-4 overflow-x-auto">
+            <pre class="text-sm text-slate-300"><code>{
+  "status": "read"  // or "unread"
+}</code></pre>
+          </div>
+
+          <h4 class="font-semibold text-slate-800 mt-6 mb-2">Example</h4>
+          <div class="bg-slate-900 rounded-lg p-4 overflow-x-auto">
+            <pre class="text-sm text-slate-300"><code>curl -X PATCH "https://api.moperator.work/api/v1/emails/1704067200000-abc123" \
+  -H "Authorization: Bearer mop_yourkey" \
+  -H "Content-Type: application/json" \
+  -d '{"status": "read"}'</code></pre>
+          </div>
+        </section>
+
+        <!-- Search Emails -->
+        <section id="search-emails" class="mb-16">
+          <h2 class="text-2xl font-bold text-slate-900 mb-4">Search Emails</h2>
+          <p class="text-slate-600 mb-2"><code class="bg-slate-100 px-2 py-0.5 rounded">GET /api/v1/emails/search</code></p>
+          <p class="text-slate-600 mb-4">Search emails by sender, subject, or labels.</p>
+
+          <h4 class="font-semibold text-slate-800 mt-6 mb-2">Query Parameters</h4>
+          <table class="w-full text-sm">
+            <tbody class="text-slate-600">
+              <tr class="border-b border-slate-100">
+                <td class="py-2"><code>from</code></td>
+                <td class="py-2">string</td>
+                <td class="py-2">Filter by sender (partial match)</td>
+              </tr>
+              <tr class="border-b border-slate-100">
+                <td class="py-2"><code>subject</code></td>
+                <td class="py-2">string</td>
+                <td class="py-2">Filter by subject (partial match)</td>
+              </tr>
+              <tr class="border-b border-slate-100">
+                <td class="py-2"><code>labels</code></td>
+                <td class="py-2">string</td>
+                <td class="py-2">Filter by labels</td>
+              </tr>
+            </tbody>
+          </table>
+
+          <h4 class="font-semibold text-slate-800 mt-6 mb-2">Example</h4>
+          <div class="bg-slate-900 rounded-lg p-4 overflow-x-auto">
+            <pre class="text-sm text-slate-300"><code>curl "https://api.moperator.work/api/v1/emails/search?from=stripe&subject=invoice" \
+  -H "Authorization: Bearer mop_yourkey"</code></pre>
+          </div>
+        </section>
+
+        <!-- Labels -->
+        <section id="labels" class="mb-16">
+          <h2 class="text-2xl font-bold text-slate-900 mb-4">Labels</h2>
+          <p class="text-slate-600 mb-4">
+            Labels are used by Claude to automatically classify incoming emails.
+            Define labels with descriptions to help Claude understand what each label means.
+          </p>
+
+          <h4 class="font-semibold text-slate-800 mt-6 mb-2">List Labels</h4>
+          <div class="bg-slate-900 rounded-lg p-4 overflow-x-auto">
+            <pre class="text-sm text-slate-300"><code>curl "https://api.moperator.work/api/v1/labels" \
+  -H "Authorization: Bearer mop_yourkey"</code></pre>
+          </div>
+
+          <h4 class="font-semibold text-slate-800 mt-6 mb-2">Create Label</h4>
+          <div class="bg-slate-900 rounded-lg p-4 overflow-x-auto">
+            <pre class="text-sm text-slate-300"><code>curl -X POST "https://api.moperator.work/api/v1/labels" \
+  -H "Authorization: Bearer mop_yourkey" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "id": "finance",
+    "name": "Finance",
+    "description": "Invoices, receipts, bank statements, payment confirmations"
+  }'</code></pre>
+          </div>
+        </section>
+
+        <!-- MCP Integration -->
+        <section id="mcp" class="mb-16">
+          <h2 class="text-2xl font-bold text-slate-900 mb-4">Claude Desktop (MCP)</h2>
+          <p class="text-slate-600 mb-4">
+            Connect Moperator to Claude Desktop using the Model Context Protocol (MCP).
+          </p>
+
+          <h4 class="font-semibold text-slate-800 mt-6 mb-2">Configuration</h4>
+          <p class="text-slate-600 mb-2">Add to your <code class="bg-slate-100 px-1.5 py-0.5 rounded">claude_desktop_config.json</code>:</p>
+          <div class="bg-slate-900 rounded-lg p-4 overflow-x-auto">
+            <pre class="text-sm text-slate-300"><code>{
+  "mcpServers": {
+    "moperator": {
+      "command": "npx",
+      "args": [
+        "-y", "mcp-remote",
+        "https://api.moperator.work/mcp",
+        "--header", "Authorization: Bearer mop_yourkey"
+      ]
+    }
+  }
+}</code></pre>
+          </div>
+
+          <h4 class="font-semibold text-slate-800 mt-6 mb-2">Available Tools</h4>
+          <ul class="text-slate-600 space-y-2">
+            <li><code>list_emails</code> - List emails with optional filters</li>
+            <li><code>get_email</code> - Get a specific email by ID</li>
+            <li><code>search_emails</code> - Search emails by sender/subject</li>
+            <li><code>mark_as_read</code> - Mark an email as read</li>
+          </ul>
+
+          <h4 class="font-semibold text-slate-800 mt-6 mb-2">Example Prompts</h4>
+          <ul class="text-slate-600 space-y-1">
+            <li>"Check my email"</li>
+            <li>"Do I have any unread emails?"</li>
+            <li>"Show me emails labeled finance"</li>
+            <li>"Search for emails from Stripe"</li>
+          </ul>
+        </section>
+
+        <!-- OpenAPI Integration -->
+        <section id="openapi" class="mb-16">
+          <h2 class="text-2xl font-bold text-slate-900 mb-4">ChatGPT (OpenAPI)</h2>
+          <p class="text-slate-600 mb-4">
+            Connect Moperator to ChatGPT using OpenAPI Actions.
+          </p>
+
+          <h4 class="font-semibold text-slate-800 mt-6 mb-2">Setup</h4>
+          <ol class="text-slate-600 space-y-2">
+            <li>1. Go to ChatGPT → Create a GPT → Configure → Actions</li>
+            <li>2. Click "Import from URL"</li>
+            <li>3. Enter: <code class="bg-slate-100 px-1.5 py-0.5 rounded">https://api.moperator.work/openapi.json</code></li>
+            <li>4. Set authentication to "API Key" with header <code>Authorization</code></li>
+            <li>5. Enter your API key as <code>Bearer mop_yourkey</code></li>
+          </ol>
+        </section>
+
+        <!-- Webhooks -->
+        <section id="webhooks" class="mb-16">
+          <h2 class="text-2xl font-bold text-slate-900 mb-4">Webhooks</h2>
+          <p class="text-slate-600 mb-4">
+            Receive real-time notifications when emails arrive. Configure webhooks in the dashboard
+            to get POST requests to your endpoint.
+          </p>
+
+          <h4 class="font-semibold text-slate-800 mt-6 mb-2">Webhook Payload</h4>
+          <div class="bg-slate-900 rounded-lg p-4 overflow-x-auto">
+            <pre class="text-sm text-slate-300"><code>{
+  "email": {
+    "from": "sender@example.com",
+    "to": "yourbot@moperator.work",
+    "subject": "Hello",
+    "textBody": "Email content...",
+    "receivedAt": "2024-01-01T00:00:00.000Z"
+  },
+  "labels": ["important"],
+  "matchedLabel": "important",
+  "timestamp": "2024-01-01T00:00:01.000Z",
+  "signature": "sha256=..."
+}</code></pre>
+          </div>
+
+          <h4 class="font-semibold text-slate-800 mt-6 mb-2">Verifying Signatures</h4>
+          <p class="text-slate-600 mb-2">Webhooks include an HMAC-SHA256 signature for verification:</p>
+          <div class="bg-slate-900 rounded-lg p-4 overflow-x-auto">
+            <pre class="text-sm text-slate-300"><code>import hmac
+import hashlib
+
+def verify_webhook(payload: bytes, signature: str, secret: str) -> bool:
+    expected = hmac.new(
+        secret.encode(),
+        payload,
+        hashlib.sha256
+    ).hexdigest()
+    return hmac.compare_digest(f"sha256={expected}", signature)</code></pre>
+          </div>
+        </section>
+
+        <!-- Python Example -->
+        <section id="python" class="mb-16">
+          <h2 class="text-2xl font-bold text-slate-900 mb-4">Python Example</h2>
+          <div class="bg-slate-900 rounded-lg p-4 overflow-x-auto">
+            <pre class="text-sm text-slate-300"><code>import requests
+
+API_KEY = "mop_yourkey"
+BASE_URL = "https://api.moperator.work"
+
+headers = {"Authorization": f"Bearer {API_KEY}"}
+
+# List unread emails
+response = requests.get(
+    f"{BASE_URL}/api/v1/emails",
+    headers=headers,
+    params={"status": "unread"}
+)
+emails = response.json()
+
+print(f"You have {emails['unreadCount']} unread emails")
+
+for email in emails['emails']:
+    print(f"- {email['email']['subject']} from {email['email']['from']}")
+
+# Get and mark as read
+if emails['emails']:
+    email_id = emails['emails'][0]['id']
+    detail = requests.get(
+        f"{BASE_URL}/api/v1/emails/{email_id}",
+        headers=headers,
+        params={"markRead": "true"}
+    ).json()
+    print(f"\nRead: {detail['email']['textBody'][:200]}...")</code></pre>
+          </div>
+        </section>
+
+        <!-- JavaScript Example -->
+        <section id="javascript" class="mb-16">
+          <h2 class="text-2xl font-bold text-slate-900 mb-4">JavaScript / Node.js Example</h2>
+          <div class="bg-slate-900 rounded-lg p-4 overflow-x-auto">
+            <pre class="text-sm text-slate-300"><code>const API_KEY = 'mop_yourkey';
+const BASE_URL = 'https://api.moperator.work';
+
+const headers = {
+  'Authorization': `Bearer ${API_KEY}`,
+  'Content-Type': 'application/json'
+};
+
+// List unread emails
+async function getUnreadEmails() {
+  const response = await fetch(
+    `${BASE_URL}/api/v1/emails?status=unread`,
+    { headers }
+  );
+  const data = await response.json();
+
+  console.log(`You have ${data.unreadCount} unread emails`);
+
+  for (const email of data.emails) {
+    console.log(`- ${email.email.subject} from ${email.email.from}`);
+  }
+
+  return data.emails;
+}
+
+// Mark email as read
+async function markAsRead(emailId) {
+  await fetch(`${BASE_URL}/api/v1/emails/${emailId}`, {
+    method: 'PATCH',
+    headers,
+    body: JSON.stringify({ status: 'read' })
+  });
+}
+
+getUnreadEmails();</code></pre>
+          </div>
+        </section>
+
+      </div>
+    </main>
+
+  </div>
+
+  <!-- Footer -->
+  <footer class="px-8 py-8 bg-slate-900 text-slate-400 mt-16">
+    <div class="max-w-6xl mx-auto flex flex-col md:flex-row items-center justify-between gap-4">
+      <div class="flex items-center gap-3">
+        <img src="../logo.svg" alt="Moperator" class="h-8 opacity-80">
+        <span class="text-slate-300 font-medium">Moperator</span>
+      </div>
+      <div class="flex gap-6 text-sm">
+        <a href="/" class="hover:text-white transition">Home</a>
+        <a href="https://github.com/raullenchai/moperator" class="hover:text-white transition">GitHub</a>
+        <a href="https://app.moperator.work" class="hover:text-white transition">Dashboard</a>
+      </div>
+      <p class="text-sm">Built with Cloudflare Workers</p>
+    </div>
+  </footer>
+
+</body>
+</html>
