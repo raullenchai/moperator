@@ -305,7 +305,7 @@
           <button
             @click="openIntegrationModal()"
             class="px-4 py-2 bg-primary text-white rounded-lg text-sm font-medium hover:bg-indigo-600"
-          >+ New Integration</button>
+          >+ New Custom Integration</button>
         </div>
 
         <!-- Quick Start (Full Access) -->
@@ -378,11 +378,13 @@
                     </div>
                     <div class="text-sm text-slate-500 mb-2" x-text="integration.description"></div>
                     <div class="flex flex-wrap gap-1">
-                      <template x-for="label in (integration.labels || [])" :key="label">
-                        <span class="px-2 py-0.5 bg-indigo-100 text-indigo-700 text-xs rounded-full" x-text="label"></span>
-                      </template>
                       <template x-if="integration.labels?.includes('*')">
                         <span class="px-2 py-0.5 bg-green-100 text-green-700 text-xs rounded-full">All Labels</span>
+                      </template>
+                      <template x-if="!integration.labels?.includes('*')">
+                        <template x-for="label in (integration.labels || [])" :key="label">
+                          <span class="px-2 py-0.5 bg-indigo-100 text-indigo-700 text-xs rounded-full" x-text="label"></span>
+                        </template>
                       </template>
                     </div>
                   </div>
@@ -526,7 +528,7 @@
   <!-- Integration Modal -->
   <div x-show="showIntegrationModal" x-cloak class="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
     <div class="bg-white rounded-xl p-6 w-full max-w-lg shadow-xl" @click.outside="showIntegrationModal = false">
-      <h3 class="text-lg font-semibold mb-4" x-text="editingIntegration._isEdit ? 'Edit Integration' : 'New Integration'"></h3>
+      <h3 class="text-lg font-semibold mb-4" x-text="editingIntegration._isEdit ? 'Edit Custom Integration' : 'New Custom Integration'"></h3>
 
       <div class="space-y-4">
         <div>
