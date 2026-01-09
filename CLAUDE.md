@@ -121,9 +121,21 @@ moperator/
 - `DELETE /api/v1/agents/:id` - Delete agent
 
 ### Emails (Authenticated)
-- `GET /api/v1/emails` - List emails (with `?labels=` filter)
+- `GET /api/v1/emails` - List emails
+  - `?labels=finance,urgent` - Filter by labels
+  - `?status=unread` - Filter by status (unread/read)
+  - Returns `unreadCount` in response
 - `GET /api/v1/emails/:id` - Get single email
+  - `?markRead=true` - Auto-mark as read when fetching
 - `GET /api/v1/emails/search` - Search by from/subject/labels
+- `PATCH /api/v1/emails/:id` - Update email status
+  - Body: `{ "status": "read" }` or `{ "status": "unread" }`
+
+### Integrations (Authenticated)
+- `GET /api/v1/integrations` - List custom integrations
+- `POST /api/v1/integrations` - Create integration with label scope
+- `PUT /api/v1/integrations/:id` - Update integration
+- `DELETE /api/v1/integrations/:id` - Delete integration
 
 ### Protocols
 - `GET /mcp` - MCP endpoint for Claude Desktop
@@ -146,9 +158,31 @@ npx wrangler pages deploy app --project-name moperator-app
 - `WEBHOOK_SIGNING_KEY` - HMAC key for webhook signatures
 - `ADMIN_API_KEY` - Admin operations (optional)
 
-## 10. Future: Label-Based Integrations
+## 10. Email Status
 
-Planned redesign where all integrations are label-scoped:
-- Quick Start: One-click enable for Claude/ChatGPT with full access
-- Custom: Create integration with specific labels → scoped API key
-- Each integration gets its own API key that only sees subscribed labels
+Emails have a read/unread status:
+- **New emails** arrive as `status: 'unread'`
+- **UI indicators:** Blue dot + bold text for unread emails
+- **Auto-mark:** Use `?markRead=true` when fetching to auto-mark as read
+- **Manual update:** `PATCH /api/v1/emails/:id` with `{ "status": "read" }` or `{ "status": "unread" }`
+- **Backwards compatible:** Older emails without status default to `'read'`
+
+### AI Agent Behavior
+- Agents can fetch emails without marking them read (default)
+- Agents can opt-in to mark as read: `GET /api/v1/emails/:id?markRead=true`
+- Frontend dashboard always uses `?markRead=true` for user opens
+
+## 11. Label-Based Integrations
+
+All integrations are label-scoped:
+- **Quick Start:** Pre-configured for Claude Desktop, ChatGPT, REST API with `catch-all` access
+- **Custom Integrations:** Create with specific labels → scoped API key
+- Each custom integration gets its own API key that only sees subscribed labels
+
+### Integration Types
+| Type | Protocol | Use Case |
+|------|----------|----------|
+| MCP | Claude Desktop | `check_inbox`, `read_email` tools |
+| OpenAI Action | ChatGPT | GPT Actions via OpenAPI schema |
+| Webhook | Custom agents | Push notifications on email arrival |
+| API | Direct access | REST API for scripts/apps |

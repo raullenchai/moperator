@@ -5,7 +5,7 @@
  * Supports tenant-scoped operations and label-based filtering.
  */
 
-import type { ParsedEmail, LabelingDecision, EmailRecord, DispatchResult } from "./types";
+import type { ParsedEmail, LabelingDecision, EmailRecord, DispatchResult, EmailStatus } from "./types";
 import { tenantKey } from "./tenant";
 
 const MAX_HISTORY = 100;
@@ -33,6 +33,7 @@ export async function saveEmailRecord(
     dispatchResults,
     processedAt: now,
     processingTimeMs,
+    status: 'unread',
   };
 
   // Save the record
@@ -62,19 +63,49 @@ export async function getEmailRecord(
 ): Promise<EmailRecord | null> {
   const data = await kv.get(tenantKey(tenantId, "email", id));
   if (!data) return null;
-  return JSON.parse(data) as EmailRecord;
+  const record = JSON.parse(data) as EmailRecord;
+  // Ensure status exists for older records
+  if (!record.status) {
+    record.status = 'read';
+  }
+  return record;
 }
 
 /**
- * Get recent emails with optional label filtering
+ * Update email status (read/unread)
+ */
+export async function updateEmailStatus(
+  kv: KVNamespace,
+  tenantId: string,
+  id: string,
+  status: EmailStatus
+): Promise<EmailRecord | null> {
+  const record = await getEmailRecord(kv, tenantId, id);
+  if (!record) return null;
+
+  record.status = status;
+  if (status === 'read' && !record.readAt) {
+    record.readAt = new Date().toISOString();
+  }
+
+  await kv.put(tenantKey(tenantId, "email", id), JSON.stringify(record), {
+    expirationTtl: HISTORY_TTL,
+  });
+
+  return record;
+}
+
+/**
+ * Get recent emails with optional label and status filtering
  */
 export async function getRecentEmails(
   kv: KVNamespace,
   tenantId: string,
   limit: number = 20,
   offset: number = 0,
-  labelFilter?: string[]
-): Promise<{ emails: EmailRecord[]; total: number }> {
+  labelFilter?: string[],
+  statusFilter?: EmailStatus
+): Promise<{ emails: EmailRecord[]; total: number; unreadCount: number }> {
   // If filtering by labels, use label indexes
   if (labelFilter && labelFilter.length > 0) {
     const emailIds = new Set<string>();
@@ -87,35 +118,50 @@ export async function getRecentEmails(
     }
 
     const allIds = Array.from(emailIds);
-    const total = allIds.length;
-    const ids = allIds.slice(offset, offset + limit);
 
-    const emails: EmailRecord[] = [];
-    for (const emailId of ids) {
+    // Fetch all records for filtering
+    let allEmails: EmailRecord[] = [];
+    for (const emailId of allIds) {
       const record = await getEmailRecord(kv, tenantId, emailId);
-      if (record) emails.push(record);
+      if (record) allEmails.push(record);
     }
 
-    return { emails, total };
+    // Apply status filter if provided
+    if (statusFilter) {
+      allEmails = allEmails.filter(e => e.status === statusFilter);
+    }
+
+    const unreadCount = allEmails.filter(e => e.status === 'unread').length;
+    const total = allEmails.length;
+    const emails = allEmails.slice(offset, offset + limit);
+
+    return { emails, total, unreadCount };
   }
 
   // Otherwise use main index
   const index = await getIndex(kv, tenantId);
-  const total = index.length;
 
-  // Get IDs for the requested page (newest first)
-  const ids = index.slice(offset, offset + limit);
-
-  // Fetch all records
-  const emails: EmailRecord[] = [];
-  for (const id of ids) {
+  // Fetch all records for filtering and counting
+  let allEmails: EmailRecord[] = [];
+  for (const id of index) {
     const record = await getEmailRecord(kv, tenantId, id);
     if (record) {
-      emails.push(record);
+      allEmails.push(record);
     }
   }
 
-  return { emails, total };
+  // Count unread before filtering
+  const unreadCount = allEmails.filter(e => e.status === 'unread').length;
+
+  // Apply status filter if provided
+  if (statusFilter) {
+    allEmails = allEmails.filter(e => e.status === statusFilter);
+  }
+
+  const total = allEmails.length;
+  const emails = allEmails.slice(offset, offset + limit);
+
+  return { emails, total, unreadCount };
 }
 
 /**

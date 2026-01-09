@@ -24,9 +24,11 @@ Email Arrives → Parse → Claude Labels → Store in KV
 
 - **Serverless** - Runs on Cloudflare Workers at the edge
 - **AI-Powered Labeling** - Claude Haiku classifies emails based on your label definitions
+- **Read/Unread Status** - Track email status with auto-mark on read support
 - **Pull-Based Access** - Query emails via MCP (Claude), OpenAPI (ChatGPT), or REST API
 - **Push Notifications** - Optional webhooks for custom agents that need real-time alerts
 - **Multi-Protocol** - Native support for ChatGPT, Claude Desktop, Gemini, and REST
+- **Label-Based Integrations** - Scope each integration to specific labels
 
 ## How It Works
 
@@ -95,13 +97,31 @@ Claude uses your descriptions to decide which labels apply to each email.
 ## Query Emails
 
 ```bash
-# Get all emails
+# Get all emails (returns unreadCount in response)
 curl https://your-worker.workers.dev/api/v1/emails \
   -H "Authorization: Bearer mop_yourkey"
 
 # Filter by label
 curl "https://your-worker.workers.dev/api/v1/emails?labels=finance" \
   -H "Authorization: Bearer mop_yourkey"
+
+# Filter by status (unread/read)
+curl "https://your-worker.workers.dev/api/v1/emails?status=unread" \
+  -H "Authorization: Bearer mop_yourkey"
+
+# Get single email (without marking as read)
+curl "https://your-worker.workers.dev/api/v1/emails/EMAIL_ID" \
+  -H "Authorization: Bearer mop_yourkey"
+
+# Get single email AND mark as read
+curl "https://your-worker.workers.dev/api/v1/emails/EMAIL_ID?markRead=true" \
+  -H "Authorization: Bearer mop_yourkey"
+
+# Mark email as read/unread
+curl -X PATCH "https://your-worker.workers.dev/api/v1/emails/EMAIL_ID" \
+  -H "Authorization: Bearer mop_yourkey" \
+  -H "Content-Type: application/json" \
+  -d '{"status": "read"}'
 
 # Search
 curl "https://your-worker.workers.dev/api/v1/emails/search?from=bank" \
@@ -125,13 +145,23 @@ Add to `~/Library/Application Support/Claude/claude_desktop_config.json`:
   "mcpServers": {
     "moperator": {
       "command": "npx",
-      "args": ["-y", "mcp-remote", "https://your-worker.workers.dev/mcp", "--header", "Authorization: Bearer mop_yourkey"]
+      "args": ["-y", "mcp-remote", "https://api.moperator.work/mcp", "--header", "Authorization: Bearer mop_yourkey"]
     }
   }
 }
 ```
 
 Then ask Claude: *"Check my email"* or *"Do I have any finance emails?"*
+
+## Email Status
+
+Emails have read/unread status:
+- **New emails** arrive as `unread`
+- **Dashboard** shows unread count badge and visual indicators (blue dot, bold text)
+- **Auto-mark as read:** Append `?markRead=true` when fetching email detail
+- **Manual update:** Use `PATCH /api/v1/emails/:id` with `{"status": "read"}` or `{"status": "unread"}`
+
+AI agents can choose whether to mark emails as read when accessing them.
 
 ## Dashboard
 
@@ -163,13 +193,20 @@ npx tsc --noEmit
 ```
 moperator/
 ├── src/
-│   ├── index.ts          # Worker entry point
+│   ├── index.ts          # Worker entry point, API routes
+│   ├── tenant.ts         # Multi-tenant auth, signup/login
+│   ├── labels.ts         # Label CRUD operations
 │   ├── labeler.ts        # Claude labeling logic
+│   ├── email-history.ts  # Email storage and status
 │   ├── dispatcher.ts     # Webhook dispatch (for custom agents)
+│   ├── types.ts          # TypeScript interfaces
 │   ├── protocols/        # MCP, OpenAPI, A2A implementations
 │   └── __tests__/        # Test files
-├── app/                   # Dashboard (Cloudflare Pages)
-└── wrangler.toml          # Cloudflare config
+├── app/                  # Dashboard (Cloudflare Pages)
+│   └── index.html        # Single-page app (Alpine.js + Tailwind)
+├── wrangler.toml         # Cloudflare config
+├── CLAUDE.md             # Detailed project documentation
+└── README.md             # This file
 ```
 
 ## License

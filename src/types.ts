@@ -87,6 +87,9 @@ export interface RoutingDecision {
   reason: string;
 }
 
+// Email status
+export type EmailStatus = 'unread' | 'read';
+
 // Email history record - now with labels
 export interface EmailRecord {
   id: string;
@@ -96,6 +99,8 @@ export interface EmailRecord {
   dispatchResults: DispatchResult[];   // Results for each agent notified
   processedAt: string;
   processingTimeMs: number;
+  status: EmailStatus;                 // Read/unread status
+  readAt?: string;                     // When email was first read
 }
 
 // Retry queue item - updated for label-based dispatch

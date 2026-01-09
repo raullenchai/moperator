@@ -202,7 +202,12 @@
       <!-- Inbox Tab -->
       <div x-show="currentTab === 'inbox'">
         <div class="flex items-center justify-between mb-6">
-          <h2 class="text-lg font-semibold text-slate-800">Inbox</h2>
+          <div class="flex items-center gap-2">
+            <h2 class="text-lg font-semibold text-slate-800">Inbox</h2>
+            <template x-if="unreadCount > 0">
+              <span class="px-2 py-0.5 bg-primary text-white text-xs rounded-full" x-text="unreadCount"></span>
+            </template>
+          </div>
           <div class="flex gap-2">
             <select
               x-model="labelFilter"
@@ -211,7 +216,7 @@
             >
               <option value="">All Labels</option>
               <template x-for="label in labels" :key="label.id">
-                <option :value="label.id" x-text="label.name"></option>
+                <option :value="label.id" x-text="label.id"></option>
               </template>
             </select>
             <button @click="loadEmails()" class="px-3 py-2 bg-slate-100 rounded-lg text-sm hover:bg-slate-200">
@@ -232,13 +237,20 @@
             <div
               @click="openEmail(email.id)"
               class="flex items-center gap-4 p-4 border-b border-slate-100 hover:bg-slate-50 cursor-pointer transition"
+              :class="email.status === 'unread' ? 'bg-blue-50/50' : ''"
             >
+              <!-- Unread indicator dot -->
+              <div class="w-2 shrink-0">
+                <template x-if="email.status === 'unread'">
+                  <div class="w-2 h-2 bg-primary rounded-full"></div>
+                </template>
+              </div>
               <div class="flex-1 min-w-0">
                 <div class="flex items-center gap-2 mb-1">
-                  <span class="font-medium text-slate-800 truncate" x-text="email.from"></span>
+                  <span class="truncate" :class="email.status === 'unread' ? 'font-semibold text-slate-900' : 'font-medium text-slate-800'" x-text="email.from"></span>
                   <span class="text-xs text-slate-400" x-text="formatDate(email.receivedAt)"></span>
                 </div>
-                <div class="text-sm text-slate-600 truncate" x-text="email.subject"></div>
+                <div class="truncate" :class="email.status === 'unread' ? 'text-sm font-medium text-slate-800' : 'text-sm text-slate-600'" x-text="email.subject"></div>
               </div>
               <div class="flex gap-1 flex-wrap">
                 <template x-for="label in (email.labels || [])" :key="label">
@@ -269,8 +281,7 @@
               <div class="flex items-start justify-between">
                 <div>
                   <div class="flex items-center gap-2 mb-1">
-                    <span class="font-medium text-slate-800" x-text="label.name"></span>
-                    <span class="text-xs font-mono text-slate-400" x-text="label.id"></span>
+                    <span class="font-medium text-slate-800" x-text="label.id"></span>
                   </div>
                   <p class="text-sm text-slate-600" x-text="label.description"></p>
                 </div>
@@ -297,117 +308,111 @@
 
       <!-- Integrations Tab -->
       <div x-show="currentTab === 'integrations'">
-        <div class="flex items-center justify-between mb-6">
-          <div>
-            <h2 class="text-lg font-semibold text-slate-800">Integrations</h2>
-            <p class="text-sm text-slate-500">Connect AI assistants and agents to your email. Each integration is scoped to specific labels.</p>
-          </div>
-          <button
-            @click="openIntegrationModal()"
-            class="px-4 py-2 bg-primary text-white rounded-lg text-sm font-medium hover:bg-indigo-600"
-          >+ New Custom Integration</button>
+        <div class="mb-6">
+          <h2 class="text-lg font-semibold text-slate-800">Integrations</h2>
+          <p class="text-sm text-slate-500">Connect AI assistants and agents to your email. Each integration is scoped to specific labels.</p>
         </div>
 
-        <!-- Quick Start (Full Access) -->
-        <div class="mb-8">
-          <h3 class="text-sm font-medium text-slate-500 uppercase tracking-wide mb-3">Quick Start (Full Access)</h3>
+        <!-- Quick Start -->
+        <div class="mb-6">
+          <h3 class="text-sm font-medium text-slate-500 uppercase tracking-wide mb-3">Quick Start</h3>
           <div class="space-y-3">
             <!-- Claude Desktop -->
             <div class="bg-white rounded-xl p-4 shadow-sm border border-slate-200 border-l-4 border-l-indigo-400">
-              <div class="flex items-start justify-between">
-                <div class="flex-1">
+              <div class="flex items-center justify-between">
+                <div class="flex-1 min-w-0">
                   <div class="flex items-center gap-2 mb-1">
                     <span class="font-medium text-slate-800">Claude Desktop</span>
                     <span class="px-1.5 py-0.5 bg-indigo-100 text-indigo-600 text-xs rounded">MCP</span>
                   </div>
-                  <div class="text-sm text-slate-500 mb-2">Connect Claude Desktop to access your emails via MCP protocol</div>
-                  <div class="flex flex-wrap gap-1">
-                    <span class="px-2 py-0.5 bg-green-100 text-green-700 text-xs rounded-full">All Labels</span>
-                  </div>
+                  <div class="text-sm text-slate-500">Connect Claude Desktop to access your emails via MCP protocol</div>
                 </div>
-                <div class="flex gap-2 ml-4 shrink-0">
-                  <button @click="showQuickStart('claude')" class="text-sm text-primary hover:text-indigo-700 font-medium">Setup</button>
+                <div class="flex items-center gap-3 ml-4 shrink-0">
+                  <div class="flex justify-end w-28">
+                    <span class="px-2.5 py-1 bg-green-100 text-green-700 text-sm rounded-full">catch-all</span>
+                  </div>
+                  <button @click="showQuickStart('claude')" class="text-sm text-primary hover:text-indigo-700 font-medium">View</button>
                 </div>
               </div>
             </div>
 
             <!-- ChatGPT -->
             <div class="bg-white rounded-xl p-4 shadow-sm border border-slate-200 border-l-4 border-l-emerald-400">
-              <div class="flex items-start justify-between">
-                <div class="flex-1">
+              <div class="flex items-center justify-between">
+                <div class="flex-1 min-w-0">
                   <div class="flex items-center gap-2 mb-1">
                     <span class="font-medium text-slate-800">ChatGPT</span>
-                    <span class="px-1.5 py-0.5 bg-emerald-100 text-emerald-600 text-xs rounded">OpenAPI</span>
+                    <span class="px-1.5 py-0.5 bg-emerald-100 text-emerald-600 text-xs rounded">OpenAI Action</span>
                   </div>
-                  <div class="text-sm text-slate-500 mb-2">Create a custom GPT with email access via OpenAPI Actions</div>
-                  <div class="flex flex-wrap gap-1">
-                    <span class="px-2 py-0.5 bg-green-100 text-green-700 text-xs rounded-full">All Labels</span>
-                  </div>
+                  <div class="text-sm text-slate-500">Create a custom GPT with email access via OpenAI Actions</div>
                 </div>
-                <div class="flex gap-2 ml-4 shrink-0">
-                  <button @click="showQuickStart('chatgpt')" class="text-sm text-primary hover:text-indigo-700 font-medium">Setup</button>
+                <div class="flex items-center gap-3 ml-4 shrink-0">
+                  <div class="flex justify-end w-28">
+                    <span class="px-2.5 py-1 bg-green-100 text-green-700 text-sm rounded-full">catch-all</span>
+                  </div>
+                  <button @click="showQuickStart('chatgpt')" class="text-sm text-primary hover:text-indigo-700 font-medium">View</button>
                 </div>
               </div>
             </div>
 
             <!-- REST API -->
             <div class="bg-white rounded-xl p-4 shadow-sm border border-slate-200 border-l-4 border-l-amber-400">
-              <div class="flex items-start justify-between">
-                <div class="flex-1">
+              <div class="flex items-center justify-between">
+                <div class="flex-1 min-w-0">
                   <div class="flex items-center gap-2 mb-1">
                     <span class="font-medium text-slate-800">REST API</span>
                     <span class="px-1.5 py-0.5 bg-amber-100 text-amber-600 text-xs rounded">API</span>
                   </div>
-                  <div class="text-sm text-slate-500 mb-2">Direct API access for custom applications and scripts</div>
-                  <div class="flex flex-wrap gap-1">
-                    <span class="px-2 py-0.5 bg-green-100 text-green-700 text-xs rounded-full">All Labels</span>
-                  </div>
+                  <div class="text-sm text-slate-500">Direct API access for custom applications and scripts</div>
                 </div>
-                <div class="flex gap-2 ml-4 shrink-0">
-                  <button @click="showQuickStart('api')" class="text-sm text-primary hover:text-indigo-700 font-medium">Setup</button>
+                <div class="flex items-center gap-3 ml-4 shrink-0">
+                  <div class="flex justify-end w-28">
+                    <span class="px-2.5 py-1 bg-green-100 text-green-700 text-sm rounded-full">catch-all</span>
+                  </div>
+                  <button @click="showQuickStart('api')" class="text-sm text-primary hover:text-indigo-700 font-medium">View</button>
                 </div>
               </div>
             </div>
+
+            <!-- New Custom Integration button -->
+            <button
+              @click="openIntegrationModal()"
+              class="w-full p-4 border-2 border-dashed border-slate-300 rounded-xl text-slate-500 hover:border-primary hover:text-primary transition-colors text-sm font-medium"
+            >+ New Custom Integration</button>
           </div>
         </div>
 
         <!-- Custom Integrations -->
-        <div>
-          <h3 class="text-sm font-medium text-slate-500 uppercase tracking-wide mb-3">Custom Integrations (Label-Scoped)</h3>
+        <div x-show="integrations.length > 0">
           <div class="space-y-3">
             <template x-for="integration in integrations" :key="integration.id">
               <div class="bg-white rounded-xl p-4 shadow-sm border border-slate-200">
-                <div class="flex items-start justify-between">
-                  <div class="flex-1">
+                <div class="flex items-center justify-between">
+                  <div class="flex-1 min-w-0">
                     <div class="flex items-center gap-2 mb-1">
                       <span class="font-medium text-slate-800" x-text="integration.name"></span>
                       <template x-for="protocol in getEnabledProtocols(integration)" :key="protocol">
-                        <span class="px-1.5 py-0.5 bg-slate-100 text-slate-600 text-xs rounded" x-text="protocol"></span>
+                        <span class="px-1.5 py-0.5 text-xs rounded" :class="getProtocolClass(protocol)" x-text="protocol"></span>
                       </template>
                     </div>
-                    <div class="text-sm text-slate-500 mb-2" x-text="integration.description"></div>
-                    <div class="flex flex-wrap gap-1">
+                    <div class="text-sm text-slate-500" x-text="integration.description"></div>
+                  </div>
+                  <div class="flex items-center gap-3 ml-4 shrink-0">
+                    <div class="flex flex-wrap gap-1.5 justify-end w-28">
                       <template x-if="integration.labels?.includes('*')">
-                        <span class="px-2 py-0.5 bg-green-100 text-green-700 text-xs rounded-full">All Labels</span>
+                        <span class="px-2.5 py-1 bg-green-100 text-green-700 text-sm rounded-full">catch-all</span>
                       </template>
                       <template x-if="!integration.labels?.includes('*')">
                         <template x-for="label in (integration.labels || [])" :key="label">
-                          <span class="px-2 py-0.5 bg-indigo-100 text-indigo-700 text-xs rounded-full" x-text="label"></span>
+                          <span class="px-2.5 py-1 bg-indigo-100 text-indigo-700 text-sm rounded-full" x-text="label"></span>
                         </template>
                       </template>
                     </div>
-                  </div>
-                  <div class="flex gap-2 ml-4 shrink-0">
-                    <button @click="viewIntegration(integration)" class="text-sm text-primary hover:text-indigo-700 font-medium">Config</button>
+                    <button @click="viewIntegration(integration)" class="text-sm text-primary hover:text-indigo-700 font-medium">View</button>
                     <button @click="editIntegration(integration)" class="text-sm text-slate-500 hover:text-slate-700">Edit</button>
                     <button @click="deleteIntegration(integration.id)" class="text-sm text-red-500 hover:text-red-700">Delete</button>
                   </div>
                 </div>
-              </div>
-            </template>
-            <template x-if="integrations.length === 0">
-              <div class="bg-white rounded-xl p-8 text-center text-slate-400 border border-slate-200">
-                No custom integrations yet. Create one to scope access to specific labels.
               </div>
             </template>
           </div>
@@ -507,7 +512,13 @@
     <div class="bg-white rounded-xl w-full max-w-2xl max-h-[80vh] overflow-hidden shadow-xl" @click.outside="selectedEmail = null">
       <div class="p-4 border-b border-slate-200 flex items-center justify-between">
         <h3 class="font-semibold text-slate-800" x-text="selectedEmail?.email?.subject"></h3>
-        <button @click="selectedEmail = null" class="text-slate-400 hover:text-slate-600">✕</button>
+        <div class="flex items-center gap-3">
+          <button
+            @click="markEmailAsUnread(selectedEmail?.id); selectedEmail = null"
+            class="text-xs text-slate-500 hover:text-slate-700"
+          >Mark unread</button>
+          <button @click="selectedEmail = null" class="text-slate-400 hover:text-slate-600">✕</button>
+        </div>
       </div>
       <div class="p-4 space-y-3 overflow-y-auto max-h-[60vh]">
         <div class="text-sm">
@@ -529,7 +540,17 @@
           </template>
         </div>
         <hr class="my-4">
-        <div class="whitespace-pre-wrap text-sm text-slate-700" x-text="selectedEmail?.email?.textBody"></div>
+        <!-- Render HTML content if available, otherwise show text -->
+        <template x-if="selectedEmail?.email?.htmlBody">
+          <iframe
+            :srcdoc="selectedEmail.email.htmlBody"
+            class="w-full min-h-[300px] border-0 bg-white"
+            sandbox="allow-same-origin"
+          ></iframe>
+        </template>
+        <template x-if="!selectedEmail?.email?.htmlBody">
+          <div class="whitespace-pre-wrap text-sm text-slate-700" x-text="selectedEmail?.email?.textBody"></div>
+        </template>
       </div>
     </div>
   </div>
@@ -768,6 +789,7 @@
         currentTab: 'inbox',
         loading: false,
         emails: [],
+        unreadCount: 0,
         labels: [],
         labelFilter: '',
         selectedEmail: null,
@@ -900,6 +922,7 @@
             });
             const data = await res.json();
             this.emails = data.emails || [];
+            this.unreadCount = data.unreadCount || 0;
           } catch (err) {
             console.error('Failed to load emails:', err);
           }
@@ -907,14 +930,69 @@
 
         async openEmail(emailId) {
           try {
-            const res = await fetch(`${this.apiBase}/api/v1/emails/${emailId}`, {
+            const res = await fetch(`${this.apiBase}/api/v1/emails/${emailId}?markRead=true`, {
               headers: { 'Authorization': `Bearer ${this.apiKey}` }
             });
             if (!res.ok) throw new Error('Failed to load email');
             const data = await res.json();
             this.selectedEmail = data;
+
+            // Update local state if it was unread
+            const email = this.emails.find(e => e.id === emailId);
+            if (email && email.status === 'unread') {
+              email.status = 'read';
+              this.unreadCount = Math.max(0, this.unreadCount - 1);
+            }
           } catch (err) {
             this.showToast('Failed to load email');
+          }
+        },
+
+        async markEmailAsRead(emailId) {
+          try {
+            await fetch(`${this.apiBase}/api/v1/emails/${emailId}`, {
+              method: 'PATCH',
+              headers: {
+                'Authorization': `Bearer ${this.apiKey}`,
+                'Content-Type': 'application/json'
+              },
+              body: JSON.stringify({ status: 'read' })
+            });
+            // Update local state
+            const email = this.emails.find(e => e.id === emailId);
+            if (email) {
+              email.status = 'read';
+              this.unreadCount = Math.max(0, this.unreadCount - 1);
+            }
+            if (this.selectedEmail) {
+              this.selectedEmail.status = 'read';
+            }
+          } catch (err) {
+            console.error('Failed to mark email as read:', err);
+          }
+        },
+
+        async markEmailAsUnread(emailId) {
+          try {
+            await fetch(`${this.apiBase}/api/v1/emails/${emailId}`, {
+              method: 'PATCH',
+              headers: {
+                'Authorization': `Bearer ${this.apiKey}`,
+                'Content-Type': 'application/json'
+              },
+              body: JSON.stringify({ status: 'unread' })
+            });
+            // Update local state
+            const email = this.emails.find(e => e.id === emailId);
+            if (email && email.status !== 'unread') {
+              email.status = 'unread';
+              this.unreadCount++;
+            }
+            if (this.selectedEmail) {
+              this.selectedEmail.status = 'unread';
+            }
+          } catch (err) {
+            console.error('Failed to mark email as unread:', err);
           }
         },
 
@@ -1092,10 +1170,20 @@
         getEnabledProtocols(integration) {
           const protocols = [];
           if (integration.mcp) protocols.push('MCP');
-          if (integration.openapi) protocols.push('OpenAPI');
+          if (integration.openapi) protocols.push('OpenAI Action');
           if (integration.webhook) protocols.push('Webhook');
           if (integration.api) protocols.push('API');
           return protocols;
+        },
+
+        getProtocolClass(protocol) {
+          const classes = {
+            'MCP': 'bg-indigo-100 text-indigo-600',
+            'OpenAI Action': 'bg-emerald-100 text-emerald-600',
+            'Webhook': 'bg-purple-100 text-purple-600',
+            'API': 'bg-amber-100 text-amber-600',
+          };
+          return classes[protocol] || 'bg-slate-100 text-slate-600';
         },
 
         showQuickStart(type) {

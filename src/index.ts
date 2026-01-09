@@ -2,7 +2,8 @@ import type { Env, Agent, Label, DispatchResult } from "./types";
 import { parseEmail } from "./email-parser";
 import { labelEmail } from "./labeler";
 import { dispatchToSubscribedAgents, isValidWebhookUrl } from "./dispatcher";
-import { saveEmailRecord, getRecentEmails, getEmailRecord, getEmailStats, searchEmails } from "./email-history";
+import { saveEmailRecord, getRecentEmails, getEmailRecord, getEmailStats, searchEmails, updateEmailStatus } from "./email-history";
+import type { EmailStatus } from "./types";
 import { addToRetryQueue, processRetryQueue, getQueueStats, getRetryItems, getDeadLetterItems } from "./retry-queue";
 import { checkRateLimit, getClientId, rateLimitResponse, checkTenantRateLimit, DEFAULT_CONFIG, STRICT_CONFIG } from "./rate-limiter";
 import { verifyApiKey, unauthorizedResponse } from "./auth";
@@ -694,19 +695,21 @@ async function handleTenantEndpoints(
 
   // ================== EMAIL ENDPOINTS ==================
 
-  // List emails (with optional label filter)
+  // List emails (with optional label and status filter)
   if (url.pathname === "/api/v1/emails" && request.method === "GET") {
     const limitParam = url.searchParams.get("limit") || "10";
     const offsetParam = url.searchParams.get("offset") || "0";
     const labelsParam = url.searchParams.get("labels");
+    const statusParam = url.searchParams.get("status") as EmailStatus | null;
 
     const limit = Math.min(Math.max(1, parseInt(limitParam) || 10), 50);
     const offset = Math.max(0, parseInt(offsetParam) || 0);
     const labelFilter = labelsParam ? labelsParam.split(",").map(l => l.trim()) : undefined;
+    const statusFilter = statusParam && ['unread', 'read'].includes(statusParam) ? statusParam : undefined;
 
-    const result = await getTenantEmails(env.EMAIL_HISTORY, tenant.id, limit, offset, labelFilter);
+    const result = await getTenantEmails(env.EMAIL_HISTORY, tenant.id, limit, offset, labelFilter, statusFilter);
     const compactEmails = result.emails.map(compactEmailSummary);
-    return json({ emails: compactEmails, total: result.total, limit, offset });
+    return json({ emails: compactEmails, total: result.total, unreadCount: result.unreadCount, limit, offset });
   }
 
   // Search emails
@@ -728,7 +731,33 @@ async function handleTenantEndpoints(
       return json({ error: "Invalid email ID format" }, 400);
     }
 
-    const record = await getTenantEmailRecord(env.EMAIL_HISTORY, tenant.id, emailId);
+    let record = await getTenantEmailRecord(env.EMAIL_HISTORY, tenant.id, emailId);
+    if (!record) {
+      return json({ error: "Email not found" }, 404);
+    }
+
+    // Auto-mark as read if requested
+    const markRead = url.searchParams.get("markRead") === "true";
+    if (markRead && record.status === 'unread') {
+      record = await updateEmailStatus(env.EMAIL_HISTORY, tenant.id, emailId, 'read') || record;
+    }
+
+    return json(record);
+  }
+
+  // Update email status (read/unread)
+  if (url.pathname.match(/^\/api\/v1\/emails\/[\w-]+$/) && request.method === "PATCH") {
+    const emailId = url.pathname.split("/")[4];
+    if (!emailId || !/^[\w-]+$/.test(emailId)) {
+      return json({ error: "Invalid email ID format" }, 400);
+    }
+
+    const body = await request.json() as { status?: EmailStatus };
+    if (!body.status || !['unread', 'read'].includes(body.status)) {
+      return json({ error: "Invalid status. Must be 'unread' or 'read'" }, 400);
+    }
+
+    const record = await updateEmailStatus(env.EMAIL_HISTORY, tenant.id, emailId, body.status);
     if (!record) {
       return json({ error: "Email not found" }, 404);
     }
@@ -1039,8 +1068,9 @@ async function getTenantEmails(
   tenantId: string,
   limit: number,
   offset: number,
-  labelFilter?: string[]
-): Promise<{ emails: any[]; total: number }> {
+  labelFilter?: string[],
+  statusFilter?: EmailStatus
+): Promise<{ emails: any[]; total: number; unreadCount: number }> {
   // If filtering by label, use label index
   if (labelFilter && labelFilter.length > 0) {
     const emailIds = new Set<string>();
@@ -1055,18 +1085,31 @@ async function getTenantEmails(
     }
 
     const allIds = Array.from(emailIds);
-    const total = allIds.length;
-    const ids = allIds.slice(offset, offset + limit);
 
-    const emails: any[] = [];
-    for (const id of ids) {
+    // Fetch all records for filtering
+    let allEmails: any[] = [];
+    for (const id of allIds) {
       const data = await kv.get(tenantKey(tenantId, "email", id));
       if (data) {
-        emails.push(JSON.parse(data));
+        const record = JSON.parse(data);
+        // Ensure status exists for older records
+        if (!record.status) record.status = 'read';
+        allEmails.push(record);
       }
     }
 
-    return { emails, total };
+    // Count unread before filtering
+    const unreadCount = allEmails.filter(e => e.status === 'unread').length;
+
+    // Apply status filter if provided
+    if (statusFilter) {
+      allEmails = allEmails.filter(e => e.status === statusFilter);
+    }
+
+    const total = allEmails.length;
+    const emails = allEmails.slice(offset, offset + limit);
+
+    return { emails, total, unreadCount };
   }
 
   // Otherwise use main index
@@ -1074,18 +1117,30 @@ async function getTenantEmails(
   const indexData = await kv.get(indexKey);
   const index: string[] = indexData ? JSON.parse(indexData) : [];
 
-  const total = index.length;
-  const ids = index.slice(offset, offset + limit);
-
-  const emails: any[] = [];
-  for (const id of ids) {
+  // Fetch all records for filtering and counting
+  let allEmails: any[] = [];
+  for (const id of index) {
     const data = await kv.get(tenantKey(tenantId, "email", id));
     if (data) {
-      emails.push(JSON.parse(data));
+      const record = JSON.parse(data);
+      // Ensure status exists for older records
+      if (!record.status) record.status = 'read';
+      allEmails.push(record);
     }
   }
 
-  return { emails, total };
+  // Count unread before filtering
+  const unreadCount = allEmails.filter(e => e.status === 'unread').length;
+
+  // Apply status filter if provided
+  if (statusFilter) {
+    allEmails = allEmails.filter(e => e.status === statusFilter);
+  }
+
+  const total = allEmails.length;
+  const emails = allEmails.slice(offset, offset + limit);
+
+  return { emails, total, unreadCount };
 }
 
 async function getTenantEmailRecord(kv: KVNamespace, tenantId: string, emailId: string): Promise<any | null> {
@@ -1158,6 +1213,7 @@ function compactEmailSummary(record: any): any {
     labels: record.labels || [],
     receivedAt: record.email?.receivedAt || record.processedAt,
     success: record.dispatchResults?.every((r: any) => r.success) ?? true,
+    status: record.status || 'read',
   };
 }
 
