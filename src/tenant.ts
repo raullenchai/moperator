@@ -342,7 +342,7 @@ export function parseTenantKey(key: string): { tenantId: string; type: string; i
 
 // ==================== Helpers ====================
 
-function generateRandomString(length: number): string {
+export function generateRandomString(length: number): string {
   const chars = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
   const randomValues = new Uint8Array(length);
   crypto.getRandomValues(randomValues);

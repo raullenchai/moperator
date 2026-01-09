@@ -41,6 +41,8 @@ import {
   tenantKey,
   signupTenant,
   loginTenant,
+  hashApiKey,
+  generateRandomString,
   type Tenant,
 } from "./tenant";
 
@@ -576,6 +578,118 @@ async function handleTenantEndpoints(
     await incrementUsage(env.TENANTS, tenant.id, "agentCount", -1);
 
     return json({ deleted: agentId });
+  }
+
+  // ================== INTEGRATION ENDPOINTS ==================
+
+  // List integrations
+  if (url.pathname === "/api/v1/integrations" && request.method === "GET") {
+    const list = await env.AGENT_REGISTRY.list({ prefix: tenantKey(tenant.id, "integration") });
+    const integrations = [];
+    for (const key of list.keys) {
+      const data = await env.AGENT_REGISTRY.get(key.name);
+      if (data) integrations.push(JSON.parse(data));
+    }
+    return json({ integrations });
+  }
+
+  // Create integration
+  if (url.pathname === "/api/v1/integrations" && request.method === "POST") {
+    let body: Record<string, unknown>;
+    try {
+      body = await request.json() as Record<string, unknown>;
+    } catch {
+      return json({ error: "Invalid JSON body" }, 400);
+    }
+
+    if (!body.id || !body.name) {
+      return json({ error: "Missing required fields: id, name" }, 400);
+    }
+
+    if (!/^[a-z]+$/.test(body.id as string)) {
+      return json({ error: "Integration ID must contain only lowercase letters (a-z)" }, 400);
+    }
+
+    if (!body.labels || !Array.isArray(body.labels) || body.labels.length === 0) {
+      return json({ error: "Integration must have at least one label" }, 400);
+    }
+
+    // Generate scoped API key for this integration
+    const integrationApiKey = `mop_${tenant.id}_${body.id}_${generateRandomString(24)}`;
+    const hashedKey = await hashApiKey(integrationApiKey);
+
+    const integration = {
+      id: body.id,
+      name: (body.name as string).slice(0, 100),
+      description: ((body.description as string) || "").slice(0, 500),
+      labels: body.labels,
+      mcp: !!body.mcp,
+      openapi: !!body.openapi,
+      webhook: !!body.webhook,
+      api: !!body.api,
+      webhookUrl: body.webhookUrl || "",
+      apiKey: integrationApiKey,
+      apiKeyHash: hashedKey,
+      createdAt: new Date().toISOString(),
+    };
+
+    await env.AGENT_REGISTRY.put(tenantKey(tenant.id, "integration", body.id as string), JSON.stringify(integration));
+
+    // Index by API key hash for auth
+    await env.AGENT_REGISTRY.put(`integration:apikey:${hashedKey}`, JSON.stringify({ tenantId: tenant.id, integrationId: body.id }));
+
+    return json({ integration }, 201);
+  }
+
+  // Update integration
+  if (url.pathname.match(/^\/api\/v1\/integrations\/[a-z]+$/) && request.method === "PUT") {
+    const integrationId = url.pathname.split("/")[4];
+    const key = tenantKey(tenant.id, "integration", integrationId);
+    const existing = await env.AGENT_REGISTRY.get(key);
+    if (!existing) {
+      return json({ error: "Integration not found" }, 404);
+    }
+
+    let body: Record<string, unknown>;
+    try {
+      body = await request.json() as Record<string, unknown>;
+    } catch {
+      return json({ error: "Invalid JSON body" }, 400);
+    }
+
+    const integration = JSON.parse(existing);
+
+    if (body.name) integration.name = (body.name as string).slice(0, 100);
+    if (body.description !== undefined) integration.description = ((body.description as string) || "").slice(0, 500);
+    if (body.labels) integration.labels = body.labels;
+    if (body.mcp !== undefined) integration.mcp = !!body.mcp;
+    if (body.openapi !== undefined) integration.openapi = !!body.openapi;
+    if (body.webhook !== undefined) integration.webhook = !!body.webhook;
+    if (body.api !== undefined) integration.api = !!body.api;
+    if (body.webhookUrl !== undefined) integration.webhookUrl = body.webhookUrl;
+
+    await env.AGENT_REGISTRY.put(key, JSON.stringify(integration));
+    return json({ integration });
+  }
+
+  // Delete integration
+  if (url.pathname.match(/^\/api\/v1\/integrations\/[a-z]+$/) && request.method === "DELETE") {
+    const integrationId = url.pathname.split("/")[4];
+    const key = tenantKey(tenant.id, "integration", integrationId);
+    const existing = await env.AGENT_REGISTRY.get(key);
+    if (!existing) {
+      return json({ error: "Integration not found" }, 404);
+    }
+
+    const integration = JSON.parse(existing);
+
+    // Delete API key index
+    if (integration.apiKeyHash) {
+      await env.AGENT_REGISTRY.delete(`integration:apikey:${integration.apiKeyHash}`);
+    }
+
+    await env.AGENT_REGISTRY.delete(key);
+    return json({ deleted: integrationId });
   }
 
   // ================== EMAIL ENDPOINTS ==================
