@@ -279,12 +279,21 @@ export async function listTenants(kv: KVNamespace): Promise<Tenant[]> {
   const tenants: Tenant[] = [];
 
   for (const key of list.keys) {
-    // Skip index keys
-    if (key.name.includes(":email:") || key.name.includes(":apikey:")) continue;
+    // Skip index keys (email, apikey, login lookups)
+    if (key.name.includes(":email:") || key.name.includes(":apikey:") || key.name.includes(":login:")) continue;
 
     const data = await kv.get(key.name);
     if (data) {
-      tenants.push(JSON.parse(data) as Tenant);
+      try {
+        const tenant = JSON.parse(data) as Tenant;
+        // Validate it's actually a tenant object
+        if (tenant.id && tenant.email) {
+          tenants.push(tenant);
+        }
+      } catch {
+        // Skip malformed entries
+        console.warn(`[TENANT] Skipping malformed entry: ${key.name}`);
+      }
     }
   }
 

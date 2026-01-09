@@ -296,13 +296,18 @@ export default {
         return json({ error: "Admin access required" }, 403);
       }
 
-      const rateLimitKv = env.RATE_LIMIT || env.AGENT_REGISTRY;
-      const rateLimit = await checkRateLimit(rateLimitKv, `admin:${clientId}`, STRICT_CONFIG);
-      if (!rateLimit.allowed) {
-        return rateLimitResponse(rateLimit.resetAt);
-      }
+      try {
+        const rateLimitKv = env.RATE_LIMIT || env.AGENT_REGISTRY;
+        const rateLimit = await checkRateLimit(rateLimitKv, `admin:${clientId}`, STRICT_CONFIG);
+        if (!rateLimit.allowed) {
+          return rateLimitResponse(rateLimit.resetAt);
+        }
 
-      return handleAdminEndpoints(request, env, url);
+        return await handleAdminEndpoints(request, env, url);
+      } catch (err) {
+        console.error("[ADMIN] Error:", err);
+        return json({ error: "Admin error", details: err instanceof Error ? err.message : String(err) }, 500);
+      }
     }
 
     // ================== LEGACY ENDPOINTS ==================
@@ -886,7 +891,7 @@ async function handleAdminEndpoints(request: Request, env: Env, url: URL): Promi
         activeLast7Days,
         activeLast30Days,
         retryQueueSize: queueStats.pending,
-        deadLetterCount: queueStats.deadLetter,
+        deadLetterCount: queueStats.deadLettered,
       },
       tenants: tenantStats,
       generatedAt: now.toISOString(),
