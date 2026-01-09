@@ -2,16 +2,12 @@
  * A2A (Agent-to-Agent) Protocol Implementation
  * For Gemini and other A2A-compatible agents
  * Spec: https://google.github.io/A2A/
- *
- * Endpoints:
- * - GET  /.well-known/agent.json - Agent Card (discovery)
- * - GET  /a2a/capabilities - List capabilities
- * - POST /a2a/tasks - Execute a task
  */
 
 import type { Tenant } from "../tenant";
 import { tenantKey } from "../tenant";
-import type { EmailRecord, Agent } from "../types";
+import type { EmailRecord } from "../types";
+import { getTenantLabels } from "../labels";
 
 // ==================== Types ====================
 
@@ -52,16 +48,13 @@ export interface A2ATaskRequest {
 
 // ==================== Agent Card ====================
 
-/**
- * Agent Card for A2A discovery - describes this agent's capabilities
- */
 export function getAgentCard(baseUrl: string): AgentCard {
   return {
     name: "Moperator Email Agent",
     description:
-      "Email for AI — the inbox for your AI agents. Query emails, search by sender or subject, and get email statistics. Built for LLMs and autonomous systems.",
+      "Email for AI — the inbox for your AI agents. Query emails by label, search by sender or subject, and get email statistics. Built for LLMs and autonomous systems.",
     url: baseUrl,
-    version: "1.0.0",
+    version: "2.0.0",
     capabilities: CAPABILITIES,
     authentication: {
       type: "bearer",
@@ -70,17 +63,15 @@ export function getAgentCard(baseUrl: string): AgentCard {
   };
 }
 
-/**
- * Available capabilities - used in both Agent Card and capabilities endpoint
- */
 export const CAPABILITIES: AgentCapability[] = [
   {
     name: "check_inbox",
-    description: "Check your email inbox. Returns a list of recent emails with sender, subject, and preview.",
+    description: "Check your email inbox. Returns a list of recent emails with sender, subject, labels, and preview.",
     inputSchema: {
       type: "object",
       properties: {
         limit: { type: "number", description: "Max emails to return (default: 20, max: 100)" },
+        labels: { type: "array", items: { type: "string" }, description: "Filter by label(s)" },
       },
     },
     outputSchema: {
@@ -110,12 +101,13 @@ export const CAPABILITIES: AgentCapability[] = [
   },
   {
     name: "search_emails",
-    description: "Search emails by sender or subject. Uses partial matching.",
+    description: "Search emails by sender, subject, or label. Uses partial matching.",
     inputSchema: {
       type: "object",
       properties: {
         from: { type: "string", description: "Sender email (partial match)" },
         subject: { type: "string", description: "Subject line (partial match)" },
+        labels: { type: "array", items: { type: "string" }, description: "Filter by label(s)" },
       },
     },
     outputSchema: {
@@ -127,8 +119,22 @@ export const CAPABILITIES: AgentCapability[] = [
     },
   },
   {
+    name: "list_labels",
+    description: "List all available labels for organizing emails.",
+    inputSchema: {
+      type: "object",
+      properties: {},
+    },
+    outputSchema: {
+      type: "object",
+      properties: {
+        labels: { type: "array", items: { type: "object" } },
+      },
+    },
+  },
+  {
     name: "email_stats",
-    description: "Get email processing statistics - total count, success rate, etc.",
+    description: "Get email processing statistics - total count, emails per label, etc.",
     inputSchema: {
       type: "object",
       properties: {},
@@ -137,8 +143,7 @@ export const CAPABILITIES: AgentCapability[] = [
       type: "object",
       properties: {
         total: { type: "number" },
-        successful: { type: "number" },
-        failed: { type: "number" },
+        byLabel: { type: "object" },
         avgProcessingTimeMs: { type: "number" },
       },
     },
@@ -185,12 +190,14 @@ async function executeCapability(
   switch (capability) {
     case "check_inbox": {
       const limit = Math.min(Number(input.limit) || 20, 100);
-      const { emails, total } = await getEmails(kv.emails, tenant.id, limit, 0);
+      const labelFilter = Array.isArray(input.labels) ? input.labels as string[] : undefined;
+      const { emails, total } = await getEmails(kv.emails, tenant.id, limit, 0, labelFilter);
       return {
         emails: emails.map((e) => ({
           id: e.id,
           from: e.email.from,
           subject: e.email.subject,
+          labels: (e as any).labels || [],
           preview: e.email.textBody?.slice(0, 200) || "",
           receivedAt: e.email.receivedAt,
         })),
@@ -209,6 +216,7 @@ async function executeCapability(
           from: record.email.from,
           to: record.email.to,
           subject: record.email.subject,
+          labels: (record as any).labels || [],
           body: record.email.textBody,
           receivedAt: record.email.receivedAt,
         },
@@ -216,20 +224,28 @@ async function executeCapability(
     }
 
     case "search_emails": {
+      const labelFilter = Array.isArray(input.labels) ? input.labels as string[] : undefined;
       const emails = await searchEmails(kv.emails, tenant.id, {
         from: input.from as string | undefined,
         subject: input.subject as string | undefined,
+        labels: labelFilter,
       });
       return {
         emails: emails.map((e) => ({
           id: e.id,
           from: e.email.from,
           subject: e.email.subject,
+          labels: (e as any).labels || [],
           preview: e.email.textBody?.slice(0, 200) || "",
           receivedAt: e.email.receivedAt,
         })),
         count: emails.length,
       };
+    }
+
+    case "list_labels": {
+      const labels = await getTenantLabels(kv.agents, tenant.id);
+      return { labels };
     }
 
     case "email_stats": {
@@ -247,8 +263,34 @@ async function getEmails(
   kv: KVNamespace,
   tenantId: string,
   limit: number,
-  offset: number
+  offset: number,
+  labelFilter?: string[]
 ): Promise<{ emails: EmailRecord[]; total: number }> {
+  if (labelFilter && labelFilter.length > 0) {
+    const emailIds = new Set<string>();
+
+    for (const label of labelFilter) {
+      const labelIndexKey = tenantKey(tenantId, "label", label, "emails");
+      const labelIndexData = await kv.get(labelIndexKey);
+      const labelIndex: string[] = labelIndexData ? JSON.parse(labelIndexData) : [];
+      for (const id of labelIndex) {
+        emailIds.add(id);
+      }
+    }
+
+    const allIds = Array.from(emailIds);
+    const total = allIds.length;
+    const ids = allIds.slice(offset, offset + limit);
+
+    const emails: EmailRecord[] = [];
+    for (const emailId of ids) {
+      const data = await kv.get(tenantKey(tenantId, "email", emailId));
+      if (data) emails.push(JSON.parse(data));
+    }
+
+    return { emails, total };
+  }
+
   const indexKey = tenantKey(tenantId, "email:index");
   const indexData = await kv.get(indexKey);
   const index: string[] = indexData ? JSON.parse(indexData) : [];
@@ -273,9 +315,9 @@ async function getEmail(kv: KVNamespace, tenantId: string, emailId: string): Pro
 async function searchEmails(
   kv: KVNamespace,
   tenantId: string,
-  query: { from?: string; subject?: string }
+  query: { from?: string; subject?: string; labels?: string[] }
 ): Promise<EmailRecord[]> {
-  const { emails } = await getEmails(kv, tenantId, 100, 0);
+  const { emails } = await getEmails(kv, tenantId, 100, 0, query.labels);
 
   return emails.filter((record) => {
     if (query.from && !record.email.from.toLowerCase().includes(query.from.toLowerCase())) {
@@ -291,15 +333,22 @@ async function searchEmails(
 async function getStats(
   kv: KVNamespace,
   tenantId: string
-): Promise<{ total: number; successful: number; failed: number; avgProcessingTimeMs: number }> {
+): Promise<{ total: number; byLabel: Record<string, number>; avgProcessingTimeMs: number }> {
   const { emails } = await getEmails(kv, tenantId, 100, 0);
 
-  const successful = emails.filter((e) => e.dispatchResult.success).length;
-  const failed = emails.filter((e) => !e.dispatchResult.success).length;
-  const avgProcessingTimeMs =
-    emails.length > 0 ? Math.round(emails.reduce((sum, e) => sum + e.processingTimeMs, 0) / emails.length) : 0;
+  const byLabel: Record<string, number> = {};
+  let totalProcessingTime = 0;
 
-  return { total: emails.length, successful, failed, avgProcessingTimeMs };
+  for (const email of emails) {
+    totalProcessingTime += email.processingTimeMs || 0;
+    for (const label of (email as any).labels || []) {
+      byLabel[label] = (byLabel[label] || 0) + 1;
+    }
+  }
+
+  const avgProcessingTimeMs = emails.length > 0 ? Math.round(totalProcessingTime / emails.length) : 0;
+
+  return { total: emails.length, byLabel, avgProcessingTimeMs };
 }
 
 // ==================== HTTP Handlers ====================

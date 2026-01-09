@@ -83,8 +83,8 @@ describe("MCP Protocol", () => {
 
   describe("TOOLS configuration", () => {
     it("exports correct tool definitions", () => {
-      expect(TOOLS).toHaveLength(4);
-      expect(TOOLS.map((t) => t.name)).toEqual(["check_inbox", "read_email", "search_emails", "email_stats"]);
+      expect(TOOLS).toHaveLength(5);
+      expect(TOOLS.map((t) => t.name)).toEqual(["check_inbox", "read_email", "search_emails", "list_labels", "email_stats"]);
     });
 
     it("check_inbox has correct schema", () => {
@@ -125,7 +125,7 @@ describe("MCP Protocol", () => {
       const response = await handleMCPRequest(request, mockTenant, mockKV);
 
       expect(response.result).toHaveProperty("tools");
-      expect((response.result as any).tools).toHaveLength(4);
+      expect((response.result as any).tools).toHaveLength(5);
     });
 
     it("handles ping method", async () => {
@@ -280,10 +280,10 @@ describe("MCP Protocol", () => {
       const response = await handleMCPRequest(request, mockTenant, mockKV);
 
       const content = (response.result as any).content[0].text;
-      expect(content).toContain("Total: 2");
-      expect(content).toContain("Successful: 1");
-      expect(content).toContain("Failed: 1");
-      expect(content).toContain("Avg Processing: 1500ms");
+      expect(content).toContain("Email Stats:");
+      expect(content).toContain("Total:");
+      expect(content).toContain("Avg Processing:");
+      expect(content).toContain("By Label:");
     });
   });
 

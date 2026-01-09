@@ -27,7 +27,7 @@ export function generateOpenAPISpec(baseUrl: string): OpenAPISpec {
     info: {
       title: "Moperator Email API",
       description:
-        "Email for AI — the inbox for your AI agents. Query emails, search by sender or subject, and manage routing agents. Built for LLMs, autonomous systems, and non-human intelligence.",
+        "Email for AI — the inbox for your AI agents. Query emails by label, search by sender or subject. Claude automatically labels incoming emails based on your definitions. Built for LLMs, autonomous systems, and non-human intelligence.",
       version: "1.0.0",
     },
     servers: [{ url: baseUrl, description: "Moperator API Server" }],

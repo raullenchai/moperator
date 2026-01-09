@@ -6,7 +6,8 @@
 
 import type { Tenant } from "../tenant";
 import { tenantKey } from "../tenant";
-import type { EmailRecord, Agent } from "../types";
+import type { EmailRecord } from "../types";
+import { getTenantLabels } from "../labels";
 
 // ==================== Types ====================
 
@@ -51,7 +52,7 @@ interface MCPResource {
 
 const SERVER_INFO = {
   name: "moperator",
-  version: "1.0.0",
+  version: "2.0.0",
   capabilities: { tools: true, resources: true },
 };
 
@@ -62,13 +63,18 @@ export const TOOLS: MCPTool[] = [
   {
     name: "check_inbox",
     description:
-      "Check your email inbox. Use this when user asks to check email, see emails, how many emails they have, or view their inbox. Returns a list of your recent emails with sender, subject, and preview.",
+      "Check your email inbox. Use this when user asks to check email, see emails, how many emails they have, or view their inbox. Returns a list of your recent emails with sender, subject, labels, and preview.",
     inputSchema: {
       type: "object",
       properties: {
         limit: {
           type: "number",
           description: "Maximum number of emails to return (default: 20, max: 100)",
+        },
+        labels: {
+          type: "array",
+          items: { type: "string" },
+          description: "Filter by label(s) - e.g. ['finance', 'important']. Leave empty for all emails.",
         },
       },
     },
@@ -91,18 +97,32 @@ export const TOOLS: MCPTool[] = [
   {
     name: "search_emails",
     description:
-      "Search your emails by sender or subject. Use this when user asks to find emails from someone or about something.",
+      "Search your emails by sender, subject, or label. Use this when user asks to find emails from someone, about something, or with a specific label.",
     inputSchema: {
       type: "object",
       properties: {
         from: { type: "string", description: "Search by sender email address" },
         subject: { type: "string", description: "Search by subject line" },
+        labels: {
+          type: "array",
+          items: { type: "string" },
+          description: "Filter by label(s)",
+        },
       },
     },
   },
   {
+    name: "list_labels",
+    description:
+      "List all available labels for organizing emails. Use this when user asks what labels/categories are available.",
+    inputSchema: {
+      type: "object",
+      properties: {},
+    },
+  },
+  {
     name: "email_stats",
-    description: "Get statistics about your email inbox - total count, success rates, etc.",
+    description: "Get statistics about your email inbox - total count, emails per label, etc.",
     inputSchema: {
       type: "object",
       properties: {},
@@ -125,6 +145,12 @@ function getResources(tenantId: string): MCPResource[] {
       uri: `moperator://${tenantId}/stats`,
       name: "Email Statistics",
       description: "Email processing statistics and metrics",
+      mimeType: "application/json",
+    },
+    {
+      uri: `moperator://${tenantId}/labels`,
+      name: "Labels",
+      description: "Available email labels/categories",
       mimeType: "application/json",
     },
   ];
@@ -187,13 +213,18 @@ async function handleToolCall(
   switch (name) {
     case "check_inbox": {
       const limit = Math.min(Number(args.limit) || 20, 100);
-      const { emails, total } = await getEmails(kv.emails, tenant.id, limit, 0);
+      const labelFilter = Array.isArray(args.labels) ? args.labels as string[] : undefined;
+      const { emails, total } = await getEmails(kv.emails, tenant.id, limit, 0, labelFilter);
 
       const summary = emails
-        .map((e, i) => `${i + 1}. From: ${e.email.from}\n   Subject: ${e.email.subject}\n   ID: ${e.id}`)
+        .map((e, i) => {
+          const labels = (e as any).labels?.join(", ") || "none";
+          return `${i + 1}. From: ${e.email.from}\n   Subject: ${e.email.subject}\n   Labels: ${labels}\n   ID: ${e.id}`;
+        })
         .join("\n\n");
 
-      return toolResult(id, `You have ${total} emails in your inbox.\n\n${summary || "No emails found."}`);
+      const labelNote = labelFilter ? ` (filtered by: ${labelFilter.join(", ")})` : "";
+      return toolResult(id, `You have ${total} emails${labelNote}.\n\n${summary || "No emails found."}`);
     }
 
     case "read_email": {
@@ -207,10 +238,12 @@ async function handleToolCall(
         return error(id, -32602, "Email not found");
       }
 
+      const labels = (record as any).labels?.join(", ") || "none";
       const formatted = `From: ${record.email.from}
 To: ${record.email.to}
 Subject: ${record.email.subject}
 Date: ${record.email.receivedAt}
+Labels: ${labels}
 
 ${record.email.textBody || "(No text content)"}`;
 
@@ -218,23 +251,41 @@ ${record.email.textBody || "(No text content)"}`;
     }
 
     case "search_emails": {
+      const labelFilter = Array.isArray(args.labels) ? args.labels as string[] : undefined;
       const emails = await searchEmails(kv.emails, tenant.id, {
         from: args.from as string | undefined,
         subject: args.subject as string | undefined,
+        labels: labelFilter,
       });
 
       const summary = emails
-        .map((e, i) => `${i + 1}. From: ${e.email.from}\n   Subject: ${e.email.subject}\n   ID: ${e.id}`)
+        .map((e, i) => {
+          const labels = (e as any).labels?.join(", ") || "none";
+          return `${i + 1}. From: ${e.email.from}\n   Subject: ${e.email.subject}\n   Labels: ${labels}\n   ID: ${e.id}`;
+        })
         .join("\n\n");
 
       return toolResult(id, `Found ${emails.length} emails:\n\n${summary || "No matching emails."}`);
     }
 
+    case "list_labels": {
+      const labels = await getTenantLabels(kv.agents, tenant.id);
+      const summary = labels
+        .map((l) => `- ${l.id}: ${l.name}\n  ${l.description}`)
+        .join("\n\n");
+
+      return toolResult(id, `Available labels:\n\n${summary}`);
+    }
+
     case "email_stats": {
       const stats = await getStats(kv.emails, tenant.id);
+      const labelStats = Object.entries(stats.byLabel)
+        .map(([label, count]) => `  - ${label}: ${count}`)
+        .join("\n");
+
       return toolResult(
         id,
-        `Email Stats:\n- Total: ${stats.total}\n- Successful: ${stats.successful}\n- Failed: ${stats.failed}\n- Avg Processing: ${stats.avgProcessingTimeMs}ms`
+        `Email Stats:\n- Total: ${stats.total}\n- Avg Processing: ${stats.avgProcessingTimeMs}ms\n\nBy Label:\n${labelStats || "  No labels"}`
       );
     }
 
@@ -273,6 +324,9 @@ async function handleResourceRead(
     case "stats":
       content = await getStats(kv.emails, tenant.id);
       break;
+    case "labels":
+      content = await getTenantLabels(kv.agents, tenant.id);
+      break;
     default:
       return error(id, -32602, `Unknown resource: ${resource}`);
   }
@@ -302,8 +356,38 @@ async function getEmails(
   kv: KVNamespace,
   tenantId: string,
   limit: number,
-  offset: number
+  offset: number,
+  labelFilter?: string[]
 ): Promise<{ emails: EmailRecord[]; total: number }> {
+  // If filtering by labels, use label indexes
+  if (labelFilter && labelFilter.length > 0) {
+    const emailIds = new Set<string>();
+
+    for (const label of labelFilter) {
+      const labelIndexKey = tenantKey(tenantId, "label", label, "emails");
+      const labelIndexData = await kv.get(labelIndexKey);
+      const labelIndex: string[] = labelIndexData ? JSON.parse(labelIndexData) : [];
+      for (const id of labelIndex) {
+        emailIds.add(id);
+      }
+    }
+
+    const allIds = Array.from(emailIds);
+    const total = allIds.length;
+    const ids = allIds.slice(offset, offset + limit);
+
+    const emails: EmailRecord[] = [];
+    for (const emailId of ids) {
+      const data = await kv.get(tenantKey(tenantId, "email", emailId));
+      if (data) {
+        emails.push(JSON.parse(data));
+      }
+    }
+
+    return { emails, total };
+  }
+
+  // Otherwise use main index
   const indexKey = tenantKey(tenantId, "email:index");
   const indexData = await kv.get(indexKey);
   const index: string[] = indexData ? JSON.parse(indexData) : [];
@@ -330,9 +414,9 @@ async function getEmail(kv: KVNamespace, tenantId: string, emailId: string): Pro
 async function searchEmails(
   kv: KVNamespace,
   tenantId: string,
-  query: { from?: string; subject?: string }
+  query: { from?: string; subject?: string; labels?: string[] }
 ): Promise<EmailRecord[]> {
-  const { emails } = await getEmails(kv, tenantId, 100, 0);
+  const { emails } = await getEmails(kv, tenantId, 100, 0, query.labels);
 
   return emails.filter((record) => {
     if (query.from && !record.email.from.toLowerCase().includes(query.from.toLowerCase())) {
@@ -348,15 +432,22 @@ async function searchEmails(
 async function getStats(
   kv: KVNamespace,
   tenantId: string
-): Promise<{ total: number; successful: number; failed: number; avgProcessingTimeMs: number }> {
+): Promise<{ total: number; byLabel: Record<string, number>; avgProcessingTimeMs: number }> {
   const { emails } = await getEmails(kv, tenantId, 100, 0);
 
-  const successful = emails.filter((e) => e.dispatchResult.success).length;
-  const failed = emails.filter((e) => !e.dispatchResult.success).length;
-  const avgProcessingTimeMs =
-    emails.length > 0 ? Math.round(emails.reduce((sum, e) => sum + e.processingTimeMs, 0) / emails.length) : 0;
+  const byLabel: Record<string, number> = {};
+  let totalProcessingTime = 0;
 
-  return { total: emails.length, successful, failed, avgProcessingTimeMs };
+  for (const email of emails) {
+    totalProcessingTime += email.processingTimeMs || 0;
+    for (const label of (email as any).labels || []) {
+      byLabel[label] = (byLabel[label] || 0) + 1;
+    }
+  }
+
+  const avgProcessingTimeMs = emails.length > 0 ? Math.round(totalProcessingTime / emails.length) : 0;
+
+  return { total: emails.length, byLabel, avgProcessingTimeMs };
 }
 
 // ==================== HTTP Handler ====================

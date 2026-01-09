@@ -66,7 +66,7 @@ describe("API endpoints", () => {
 
       expect(response.status).toBe(200);
       const body = await response.json();
-      expect(body).toEqual({ status: "ok", service: "moperator", version: "2.0.0" });
+      expect(body).toEqual({ status: "ok", service: "moperator", version: "3.0.0" });
     });
   });
 
@@ -145,7 +145,7 @@ describe("API endpoints", () => {
 
       expect(response.status).toBe(400);
       const body = (await response.json()) as ErrorResponse;
-      expect(body.error).toBe("Missing required fields: id, name, description, webhookUrl");
+      expect(body.error).toBe("Missing required fields: id, name, description");
     });
   });
 
@@ -178,32 +178,31 @@ describe("API endpoints", () => {
     });
   });
 
-  describe("GET /emails", () => {
-    it("returns empty list when no emails", async () => {
+  describe("GET /emails (legacy - deprecated)", () => {
+    it("returns 410 for deprecated email endpoints", async () => {
       const request = new Request("http://localhost/emails");
       const ctx = createExecutionContext();
       const response = await worker.fetch(request, env, ctx);
       await waitOnExecutionContext(ctx);
 
-      expect(response.status).toBe(200);
-      const body = (await response.json()) as EmailsResponse;
-      expect(body.emails).toEqual([]);
-      expect(body.total).toBe(0);
+      // Legacy endpoints return 410 (Gone) with hint to use /api/v1/
+      expect(response.status).toBe(410);
+      const body = (await response.json()) as { error: string; hint: string };
+      expect(body.error).toContain("/api/v1/emails");
     });
   });
 
-  describe("GET /emails/stats", () => {
-    it("returns stats with zeros when no emails", async () => {
+  describe("GET /emails/stats (legacy - deprecated)", () => {
+    it("returns 410 for deprecated stats endpoint", async () => {
       const request = new Request("http://localhost/emails/stats");
       const ctx = createExecutionContext();
       const response = await worker.fetch(request, env, ctx);
       await waitOnExecutionContext(ctx);
 
-      expect(response.status).toBe(200);
-      const body = (await response.json()) as StatsResponse;
-      expect(body.total).toBe(0);
-      expect(body.successful).toBe(0);
-      expect(body.failed).toBe(0);
+      // Legacy endpoints return 410 (Gone) with hint to use /api/v1/
+      expect(response.status).toBe(410);
+      const body = (await response.json()) as { error: string; hint: string };
+      expect(body.error).toContain("/api/v1/emails");
     });
   });
 
@@ -261,6 +260,114 @@ describe("API endpoints", () => {
       expect(response.status).toBe(401);
       const body = (await response.json()) as ErrorResponse;
       expect(body.error).toBe("Authorization required. Use Bearer token with your API key.");
+    });
+  });
+
+  describe("OPTIONS (CORS preflight)", () => {
+    it("returns CORS headers for preflight request", async () => {
+      const request = new Request("http://localhost/api/v1/emails", {
+        method: "OPTIONS",
+      });
+      const ctx = createExecutionContext();
+      const response = await worker.fetch(request, env, ctx);
+      await waitOnExecutionContext(ctx);
+
+      expect(response.status).toBe(200);
+      expect(response.headers.get("Access-Control-Allow-Origin")).toBe("*");
+      expect(response.headers.get("Access-Control-Allow-Methods")).toContain("GET");
+    });
+  });
+
+  describe("GET /openapi.json", () => {
+    it("returns OpenAPI spec", async () => {
+      const request = new Request("http://localhost/openapi.json");
+      const ctx = createExecutionContext();
+      const response = await worker.fetch(request, env, ctx);
+      await waitOnExecutionContext(ctx);
+
+      expect(response.status).toBe(200);
+      expect(response.headers.get("Content-Type")).toBe("application/json");
+      const body = await response.json() as { openapi: string; info: { title: string } };
+      expect(body.openapi).toBe("3.1.0");
+      expect(body.info.title).toBe("Moperator Email API");
+    });
+
+    it("returns YAML when requested", async () => {
+      const request = new Request("http://localhost/openapi.json?format=yaml");
+      const ctx = createExecutionContext();
+      const response = await worker.fetch(request, env, ctx);
+      await waitOnExecutionContext(ctx);
+
+      expect(response.status).toBe(200);
+      expect(response.headers.get("Content-Type")).toBe("text/yaml");
+    });
+  });
+
+  describe("GET /.well-known/agent.json", () => {
+    it("returns A2A agent card", async () => {
+      const request = new Request("http://localhost/.well-known/agent.json");
+      const ctx = createExecutionContext();
+      const response = await worker.fetch(request, env, ctx);
+      await waitOnExecutionContext(ctx);
+
+      expect(response.status).toBe(200);
+      const body = await response.json() as { name: string; version: string };
+      expect(body.name).toBe("Moperator Email Agent");
+      expect(body.version).toBe("2.0.0");
+    });
+  });
+
+  describe("GET /a2a/capabilities", () => {
+    it("returns A2A capabilities", async () => {
+      const request = new Request("http://localhost/a2a/capabilities");
+      const ctx = createExecutionContext();
+      const response = await worker.fetch(request, env, ctx);
+      await waitOnExecutionContext(ctx);
+
+      expect(response.status).toBe(200);
+      const body = await response.json() as { capabilities: unknown[] };
+      expect(body.capabilities).toHaveLength(5);
+    });
+  });
+
+  describe("GET /", () => {
+    it("returns 401 for unauthenticated request", async () => {
+      // Root path falls through to authenticated endpoints
+      const request = new Request("http://localhost/");
+      const ctx = createExecutionContext();
+      const response = await worker.fetch(request, env, ctx);
+      await waitOnExecutionContext(ctx);
+
+      expect(response.status).toBe(401);
+    });
+  });
+
+  describe("POST /retry/process", () => {
+    it("processes retry queue", async () => {
+      const request = new Request("http://localhost/retry/process", {
+        method: "POST",
+      });
+      const ctx = createExecutionContext();
+      const response = await worker.fetch(request, env, ctx);
+      await waitOnExecutionContext(ctx);
+
+      expect(response.status).toBe(200);
+      const body = await response.json() as { processed: number };
+      expect(body.processed).toBe(0);
+    });
+  });
+
+  describe("GET /health/agents", () => {
+    it("returns health summary", async () => {
+      const request = new Request("http://localhost/health/agents");
+      const ctx = createExecutionContext();
+      const response = await worker.fetch(request, env, ctx);
+      await waitOnExecutionContext(ctx);
+
+      expect(response.status).toBe(200);
+      const body = await response.json() as { agents: unknown[]; summary: object };
+      expect(body.agents).toEqual([]);
+      expect(body.summary).toBeDefined();
     });
   });
 });

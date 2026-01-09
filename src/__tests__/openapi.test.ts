@@ -1,4 +1,4 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, beforeAll } from "vitest";
 import { generateOpenAPISpec, handleOpenAPIRequest, type OpenAPISpec } from "../protocols/openapi";
 
 describe("OpenAPI Protocol", () => {

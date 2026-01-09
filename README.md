@@ -6,89 +6,141 @@
 
 > Email for AI (and non-human Intelligence)
 
-The first email infrastructure built for AI agents, LLMs, and autonomous systems. Moperator routes incoming emails to your AI backends using Claude for intelligent intent classification — because your agents deserve their own inbox.
+The first email infrastructure built for AI agents, LLMs, and autonomous systems. Moperator uses Claude to intelligently label incoming emails, making them instantly queryable by ChatGPT, Claude Desktop, Gemini, or your custom agents.
 
 ## Architecture
 
 ```
-┌─────────────┐     ┌─────────────┐     ┌─────────────┐     ┌─────────────┐
-│   Inbound   │────▶│  Cloudflare │────▶│   Claude    │────▶│  KV Store   │
-│    Email    │     │   Worker    │     │   Haiku     │     │  (instant)  │
-└─────────────┘     └─────────────┘     └─────────────┘     └─────────────┘
-                           │                   │                   │
-                           ▼                   ▼                   ▼
-                    ┌─────────────┐     ┌─────────────┐     ┌─────────────┐
-                    │ postal-mime │     │  KV Agent   │     │   Webhook   │
-                    │   Parser    │     │  Registry   │     │  (optional) │
-                    └─────────────┘     └─────────────┘     └─────────────┘
+Email Arrives → Parse → Claude Labels → Store in KV
+                                            ↓
+                    ┌───────────────────────┴───────────────────────┐
+                    ↓                                               ↓
+              AI Assistants (Pull)                         Custom Agents (Push+Pull)
+         ChatGPT / Claude / Gemini                         Webhook on arrival
+         Query: GET /emails?labels=finance                 + Query API anytime
 ```
 
 ## Features
 
 - **Serverless** - Runs on Cloudflare Workers at the edge
-- **AI-Powered Routing** - Claude Haiku analyzes content and routes to the right agent
-- **Instant Access** - Query emails via MCP (Claude), OpenAPI (ChatGPT), or REST
-- **Secure Webhooks** - HMAC-SHA256 signed payloads for real-time dispatch
-- **Multi-Protocol** - Native support for ChatGPT, Claude Desktop, and Gemini
+- **AI-Powered Labeling** - Claude Haiku classifies emails based on your label definitions
+- **Pull-Based Access** - Query emails via MCP (Claude), OpenAPI (ChatGPT), or REST API
+- **Push Notifications** - Optional webhooks for custom agents that need real-time alerts
+- **Multi-Protocol** - Native support for ChatGPT, Claude Desktop, Gemini, and REST
 
 ## How It Works
 
-1. **Email arrives** at `you@yourdomain.com`
+1. **Email arrives** at `yourbot@moperator.work`
 2. **Cloudflare routes** to Moperator Worker
 3. **Worker parses** email (postal-mime)
-4. **Claude Haiku** decides which agent should handle it
-5. **Email stored** in KV (instantly queryable via API)
-6. **Webhook fired** to agent (optional, for real-time processing)
+4. **Claude Haiku** assigns labels based on your definitions
+5. **Email stored** in KV with labels (instantly queryable)
+6. **Webhook fired** to subscribed agents (optional, for real-time)
+
+## Integration Models
+
+| Integration | Model | Description |
+|-------------|-------|-------------|
+| **ChatGPT** | Pull | Query emails via OpenAPI Actions |
+| **Claude Desktop** | Pull | Access emails via MCP tools |
+| **Gemini** | Pull | A2A protocol capabilities |
+| **Custom Agents** | Push + Pull | Webhooks AND/OR API queries |
+
+### Custom Agent Modes
+- **Pull-only:** No webhook, agent queries API on its schedule
+- **Push + Pull:** Agent receives webhooks on email arrival, can also query anytime
 
 ## Quick Start
 
 ```bash
 # Clone and install
-git clone https://github.com/yourusername/moperator.git
+git clone https://github.com/anthropics/moperator.git
 cd moperator && npm install
 
 # Login to Cloudflare
 npx wrangler login
 
-# Create KV namespaces and configure (see docs/DEPLOYMENT.md)
+# Create KV namespaces
 npx wrangler kv namespace create AGENT_REGISTRY
 npx wrangler kv namespace create EMAIL_HISTORY
+npx wrangler kv namespace create TENANTS
+npx wrangler kv namespace create RETRY_QUEUE
 
 # Set secrets
 npx wrangler secret put ANTHROPIC_API_KEY
 npx wrangler secret put WEBHOOK_SIGNING_KEY
+npx wrangler secret put ADMIN_API_KEY
 
 # Deploy
 npm run deploy
 ```
 
-See [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md) for complete setup instructions.
+## Define Labels
+
+Labels help Claude classify your emails. Define them via API or dashboard:
+
+```bash
+curl -X POST https://your-worker.workers.dev/api/v1/labels \
+  -H "Authorization: Bearer mop_yourkey" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "id": "finance",
+    "name": "Finance & Bills",
+    "description": "Invoices, receipts, bank statements, payment confirmations"
+  }'
+```
+
+Claude uses your descriptions to decide which labels apply to each email.
+
+## Query Emails
+
+```bash
+# Get all emails
+curl https://your-worker.workers.dev/api/v1/emails \
+  -H "Authorization: Bearer mop_yourkey"
+
+# Filter by label
+curl "https://your-worker.workers.dev/api/v1/emails?labels=finance" \
+  -H "Authorization: Bearer mop_yourkey"
+
+# Search
+curl "https://your-worker.workers.dev/api/v1/emails/search?from=bank" \
+  -H "Authorization: Bearer mop_yourkey"
+```
 
 ## AI Integrations
 
-Moperator works with your favorite AI assistants out of the box:
+| AI Assistant | Protocol | How to Connect |
+|--------------|----------|----------------|
+| **ChatGPT** | OpenAPI | Import `https://your-worker.workers.dev/openapi.json` as GPT Action |
+| **Claude Desktop** | MCP | Add to `claude_desktop_config.json` (see below) |
+| **Gemini** | A2A | `/.well-known/agent.json` endpoint |
 
-| AI Assistant | Protocol | Setup Guide |
-|--------------|----------|-------------|
-| **ChatGPT** | OpenAPI Actions | [docs/AI_INTEGRATIONS.md#chatgpt](docs/AI_INTEGRATIONS.md#chatgpt-integration-openapi) |
-| **Claude Desktop** | MCP | [docs/AI_INTEGRATIONS.md#claude](docs/AI_INTEGRATIONS.md#claude-desktop-integration-mcp) |
-| **Gemini** | A2A | [docs/AI_INTEGRATIONS.md#gemini](docs/AI_INTEGRATIONS.md#gemini-integration-a2a) |
+### Claude Desktop Setup
 
-Ask your AI: *"Check my email"* or *"How many emails do I have?"*
+Add to `~/Library/Application Support/Claude/claude_desktop_config.json`:
 
-### TODO: Gemini Consumer Support
+```json
+{
+  "mcpServers": {
+    "moperator": {
+      "command": "npx",
+      "args": ["-y", "mcp-remote", "https://your-worker.workers.dev/mcp", "--header", "Authorization: Bearer mop_yourkey"]
+    }
+  }
+}
+```
 
-> A2A protocol is implemented but Gemini consumer (gemini.google.com) doesn't support A2A yet — only Gemini Enterprise (Google Cloud Vertex AI). The A2A endpoints are ready for when consumer support arrives.
+Then ask Claude: *"Check my email"* or *"Do I have any finance emails?"*
 
-## Documentation
+## Dashboard
 
-| Document | Description |
-|----------|-------------|
-| [API Reference](docs/API_REFERENCE.md) | Complete endpoint documentation |
-| [Deployment Guide](docs/DEPLOYMENT.md) | Cloudflare setup, KV namespaces, secrets |
-| [AI Integrations](docs/AI_INTEGRATIONS.md) | ChatGPT, Claude Desktop, Gemini setup |
-| [Webhooks](docs/WEBHOOKS.md) | Payload format and signature verification |
-| [Security](docs/SECURITY.md) | Rate limiting, authentication, best practices |
+A web dashboard is available at [app.moperator.work](https://app.moperator.work) for managing labels, agents, and viewing emails.
+
+To self-host the dashboard, deploy the `app/` folder to Cloudflare Pages:
+```bash
+npx wrangler pages deploy app --project-name moperator-app
+```
 
 ## Development
 
@@ -98,6 +150,9 @@ npm run dev
 
 # Run tests
 npm test
+
+# Run tests with coverage
+npm test -- --coverage
 
 # Type check
 npx tsc --noEmit
@@ -109,12 +164,11 @@ npx tsc --noEmit
 moperator/
 ├── src/
 │   ├── index.ts          # Worker entry point
+│   ├── labeler.ts        # Claude labeling logic
+│   ├── dispatcher.ts     # Webhook dispatch (for custom agents)
 │   ├── protocols/        # MCP, OpenAPI, A2A implementations
-│   ├── router.ts         # Claude routing logic
-│   ├── dispatcher.ts     # Webhook dispatch
 │   └── __tests__/        # Test files
-├── docs/                  # Documentation
-├── agent-example/         # Example agent implementation
+├── app/                   # Dashboard (Cloudflare Pages)
 └── wrangler.toml          # Cloudflare config
 ```
 

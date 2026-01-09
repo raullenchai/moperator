@@ -1,12 +1,34 @@
-import { env } from "cloudflare:test";
-import { describe, it, expect, beforeEach } from "vitest";
+import { describe, it, expect, beforeEach, vi } from "vitest";
 import {
   addToRetryQueue,
   getRetryItems,
   getDeadLetterItems,
   getQueueStats,
+  processRetryQueue,
 } from "../retry-queue";
-import type { ParsedEmail } from "../types";
+import type { ParsedEmail, Agent } from "../types";
+
+// Mock KV namespace
+function createMockKV() {
+  const store = new Map<string, string>();
+  return {
+    get: vi.fn((key: string) => Promise.resolve(store.get(key) ?? null)),
+    put: vi.fn((key: string, value: string) => {
+      store.set(key, value);
+      return Promise.resolve();
+    }),
+    delete: vi.fn((key: string) => {
+      store.delete(key);
+      return Promise.resolve();
+    }),
+    list: vi.fn(({ prefix }: { prefix?: string } = {}) => {
+      const keys = Array.from(store.keys())
+        .filter((k) => !prefix || k.startsWith(prefix))
+        .map((name) => ({ name }));
+      return Promise.resolve({ keys });
+    }),
+  } as unknown as KVNamespace;
+}
 
 const mockEmail: ParsedEmail = {
   from: "sender@example.com",
@@ -17,22 +39,33 @@ const mockEmail: ParsedEmail = {
   receivedAt: "2024-01-15T10:00:00.000Z",
 };
 
+const mockAgent: Agent = {
+  id: "test-agent",
+  name: "Test Agent",
+  description: "A test agent",
+  webhookUrl: "https://example.com/webhook",
+  labels: ["finance", "important"],
+  active: true,
+};
+
+const mockLabels = ["finance", "important"];
+const mockMatchedLabel = "finance";
+
 describe("retry-queue", () => {
-  beforeEach(async () => {
-    // Clear RETRY_QUEUE KV before each test
-    const keys = await env.RETRY_QUEUE.list();
-    for (const key of keys.keys) {
-      await env.RETRY_QUEUE.delete(key.name);
-    }
+  let kv: KVNamespace;
+
+  beforeEach(() => {
+    kv = createMockKV();
   });
 
   describe("addToRetryQueue", () => {
     it("adds an item to the retry queue", async () => {
       const id = await addToRetryQueue(
-        env.RETRY_QUEUE,
+        kv,
         mockEmail,
-        "test-agent",
-        "https://example.com/webhook",
+        mockAgent,
+        mockLabels,
+        mockMatchedLabel,
         "Test routing reason",
         "Connection timeout"
       );
@@ -43,22 +76,27 @@ describe("retry-queue", () => {
 
     it("stores the item in KV with correct properties", async () => {
       const id = await addToRetryQueue(
-        env.RETRY_QUEUE,
+        kv,
         mockEmail,
-        "test-agent",
-        "https://example.com/webhook",
+        mockAgent,
+        mockLabels,
+        mockMatchedLabel,
         "Test routing reason",
         "Connection timeout"
       );
 
-      const stored = await env.RETRY_QUEUE.get(`retry:${id}`);
-      expect(stored).toBeDefined();
+      // Get the stored value from the mock
+      const putCall = (kv.put as any).mock.calls.find((call: any[]) =>
+        call[0].includes(`retry:${id}`)
+      );
+      const item = JSON.parse(putCall[1]);
 
-      const item = JSON.parse(stored!);
       expect(item.id).toBe(id);
       expect(item.email).toEqual(mockEmail);
       expect(item.agentId).toBe("test-agent");
       expect(item.webhookUrl).toBe("https://example.com/webhook");
+      expect(item.labels).toEqual(mockLabels);
+      expect(item.matchedLabel).toBe(mockMatchedLabel);
       expect(item.routingReason).toBe("Test routing reason");
       expect(item.lastError).toBe("Connection timeout");
       expect(item.attempts).toBe(1);
@@ -69,60 +107,88 @@ describe("retry-queue", () => {
       const beforeAdd = Date.now();
 
       const id = await addToRetryQueue(
-        env.RETRY_QUEUE,
+        kv,
         mockEmail,
-        "test-agent",
-        "https://example.com/webhook",
+        mockAgent,
+        mockLabels,
+        mockMatchedLabel,
         "Test reason",
         "Error"
       );
 
-      const stored = await env.RETRY_QUEUE.get(`retry:${id}`);
-      const item = JSON.parse(stored!);
+      const putCall = (kv.put as any).mock.calls.find((call: any[]) =>
+        call[0].includes(`retry:${id}`)
+      );
+      const item = JSON.parse(putCall[1]);
       const nextAttempt = new Date(item.nextAttempt).getTime();
 
       // Next attempt should be at least 1 minute in the future
       expect(nextAttempt).toBeGreaterThan(beforeAdd);
       expect(nextAttempt - beforeAdd).toBeGreaterThanOrEqual(60000);
     });
+
+    it("includes tenant ID when provided", async () => {
+      const id = await addToRetryQueue(
+        kv,
+        mockEmail,
+        mockAgent,
+        mockLabels,
+        mockMatchedLabel,
+        "Test reason",
+        "Error",
+        "test-tenant"
+      );
+
+      const putCall = (kv.put as any).mock.calls.find((call: any[]) =>
+        call[0].includes(`retry:${id}`)
+      );
+      const item = JSON.parse(putCall[1]);
+
+      expect(item.tenantId).toBe("test-tenant");
+    });
   });
 
   describe("getRetryItems", () => {
     it("returns empty array when no items", async () => {
-      const items = await getRetryItems(env.RETRY_QUEUE);
+      const items = await getRetryItems(kv);
 
       expect(items).toEqual([]);
     });
 
     it("returns all retry items", async () => {
+      const agent1: Agent = { ...mockAgent, id: "agent-1" };
+      const agent2: Agent = { ...mockAgent, id: "agent-2" };
+
       await addToRetryQueue(
-        env.RETRY_QUEUE,
+        kv,
         mockEmail,
-        "agent-1",
-        "https://example.com/webhook1",
+        agent1,
+        mockLabels,
+        mockMatchedLabel,
         "Reason 1",
         "Error 1"
       );
 
       await addToRetryQueue(
-        env.RETRY_QUEUE,
+        kv,
         mockEmail,
-        "agent-2",
-        "https://example.com/webhook2",
+        agent2,
+        mockLabels,
+        mockMatchedLabel,
         "Reason 2",
         "Error 2"
       );
 
-      const items = await getRetryItems(env.RETRY_QUEUE);
+      const items = await getRetryItems(kv);
 
       expect(items).toHaveLength(2);
-      expect(items.map(i => i.agentId).sort()).toEqual(["agent-1", "agent-2"]);
+      expect(items.map((i) => i.agentId).sort()).toEqual(["agent-1", "agent-2"]);
     });
   });
 
   describe("getDeadLetterItems", () => {
     it("returns empty array when no dead letters", async () => {
-      const items = await getDeadLetterItems(env.RETRY_QUEUE);
+      const items = await getDeadLetterItems(kv);
 
       expect(items).toEqual([]);
     });
@@ -130,35 +196,69 @@ describe("retry-queue", () => {
 
   describe("getQueueStats", () => {
     it("returns zeros when queue is empty", async () => {
-      const stats = await getQueueStats(env.RETRY_QUEUE);
+      const stats = await getQueueStats(kv);
 
       expect(stats.pending).toBe(0);
       expect(stats.deadLettered).toBe(0);
     });
 
     it("counts pending items correctly", async () => {
+      const agent1: Agent = { ...mockAgent, id: "agent-1" };
+      const agent2: Agent = { ...mockAgent, id: "agent-2" };
+
       await addToRetryQueue(
-        env.RETRY_QUEUE,
+        kv,
         mockEmail,
-        "agent-1",
-        "https://example.com/webhook1",
+        agent1,
+        mockLabels,
+        mockMatchedLabel,
         "Reason 1",
         "Error 1"
       );
 
       await addToRetryQueue(
-        env.RETRY_QUEUE,
+        kv,
         mockEmail,
-        "agent-2",
-        "https://example.com/webhook2",
+        agent2,
+        mockLabels,
+        mockMatchedLabel,
         "Reason 2",
         "Error 2"
       );
 
-      const stats = await getQueueStats(env.RETRY_QUEUE);
+      const stats = await getQueueStats(kv);
 
       expect(stats.pending).toBe(2);
       expect(stats.deadLettered).toBe(0);
+    });
+  });
+
+  describe("processRetryQueue", () => {
+    it("returns zeros when queue is empty", async () => {
+      const stats = await processRetryQueue(kv, "test-signing-key");
+
+      expect(stats.processed).toBe(0);
+      expect(stats.succeeded).toBe(0);
+      expect(stats.failed).toBe(0);
+      expect(stats.deadLettered).toBe(0);
+    });
+
+    it("skips items not yet due", async () => {
+      // Add an item that won't be due for retry yet
+      await addToRetryQueue(
+        kv,
+        mockEmail,
+        mockAgent,
+        mockLabels,
+        mockMatchedLabel,
+        "Test reason",
+        "Error"
+      );
+
+      // Process immediately - item won't be due yet (scheduled for future)
+      const stats = await processRetryQueue(kv, "test-signing-key");
+
+      expect(stats.processed).toBe(0);
     });
   });
 });

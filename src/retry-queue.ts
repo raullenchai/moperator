@@ -1,17 +1,28 @@
-import type { ParsedEmail, RetryItem, DispatchResult } from "./types";
+/**
+ * Retry Queue
+ *
+ * Handles failed webhook deliveries with exponential backoff.
+ * Updated for label-based dispatch system.
+ */
+
+import type { ParsedEmail, RetryItem, Agent } from "./types";
 import { dispatchToAgent } from "./dispatcher";
 
 const MAX_ATTEMPTS = 5;
 const BASE_DELAY_MS = 60 * 1000; // 1 minute
 
+/**
+ * Add a failed webhook delivery to the retry queue
+ */
 export async function addToRetryQueue(
   kv: KVNamespace,
   email: ParsedEmail,
-  agentId: string,
-  webhookUrl: string,
+  agent: Agent,
+  labels: string[],
+  matchedLabel: string,
   routingReason: string,
   error: string,
-  tenantId?: string // Optional tenant scoping
+  tenantId?: string
 ): Promise<string> {
   const id = generateId();
   const now = new Date();
@@ -20,8 +31,10 @@ export async function addToRetryQueue(
   const item: RetryItem & { tenantId?: string } = {
     id,
     email,
-    agentId,
-    webhookUrl,
+    agentId: agent.id,
+    webhookUrl: agent.webhookUrl || "",
+    labels,
+    matchedLabel,
     routingReason,
     attempts: 1,
     maxAttempts: MAX_ATTEMPTS,
@@ -47,6 +60,9 @@ export async function addToRetryQueue(
   return id;
 }
 
+/**
+ * Process the retry queue - called by scheduled cron
+ */
 export async function processRetryQueue(
   kv: KVNamespace,
   signingKey: string
@@ -68,9 +84,21 @@ export async function processRetryQueue(
     processed++;
     console.log(`[RETRY] Processing ${item.id} (attempt ${item.attempts + 1}/${item.maxAttempts})`);
 
+    // Create a minimal agent for dispatch
+    const agent: Agent = {
+      id: item.agentId,
+      name: item.agentId,
+      description: "",
+      webhookUrl: item.webhookUrl,
+      labels: [item.matchedLabel],
+      active: true,
+    };
+
     const result = await dispatchToAgent(
       item.email,
-      { id: item.agentId, name: item.agentId, description: "", webhookUrl: item.webhookUrl, active: true },
+      item.labels,
+      item.matchedLabel,
+      agent,
       item.routingReason,
       signingKey
     );
@@ -112,6 +140,9 @@ export async function processRetryQueue(
   return { processed, succeeded, failed, deadLettered };
 }
 
+/**
+ * Get all items in the retry queue
+ */
 export async function getRetryItems(kv: KVNamespace): Promise<RetryItem[]> {
   const list = await kv.list({ prefix: "retry:" });
   const items: RetryItem[] = [];
@@ -129,6 +160,9 @@ export async function getRetryItems(kv: KVNamespace): Promise<RetryItem[]> {
   return items;
 }
 
+/**
+ * Get items in the dead letter queue
+ */
 export async function getDeadLetterItems(kv: KVNamespace): Promise<RetryItem[]> {
   const list = await kv.list({ prefix: "dead:" });
   const items: RetryItem[] = [];
@@ -143,6 +177,9 @@ export async function getDeadLetterItems(kv: KVNamespace): Promise<RetryItem[]> 
   return items;
 }
 
+/**
+ * Get queue statistics
+ */
 export async function getQueueStats(kv: KVNamespace): Promise<{
   pending: number;
   deadLettered: number;
@@ -151,7 +188,7 @@ export async function getQueueStats(kv: KVNamespace): Promise<{
   const deadList = await kv.list({ prefix: "dead:" });
 
   // Exclude the index key from count
-  const pendingCount = retryList.keys.filter(k => k.name !== "retry:index").length;
+  const pendingCount = retryList.keys.filter((k) => k.name !== "retry:index").length;
 
   return {
     pending: pendingCount,

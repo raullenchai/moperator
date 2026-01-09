@@ -1,0 +1,705 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Moperator - AI Email Gateway</title>
+  <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          colors: {
+            primary: '#6366f1',
+            dark: '#0f172a',
+          }
+        }
+      }
+    }
+  </script>
+  <style>
+    [x-cloak] { display: none !important; }
+  </style>
+</head>
+<body class="bg-slate-50 min-h-screen" x-data="app()" x-init="init()">
+
+  <!-- Main App -->
+  <div class="min-h-screen">
+    <!-- Header -->
+    <header class="bg-white border-b border-slate-200">
+      <div class="max-w-6xl mx-auto px-4 py-4 flex items-center justify-between">
+        <h1 class="text-xl font-bold text-slate-800">Moperator</h1>
+        <div class="flex items-center gap-2">
+          <input
+            type="password"
+            x-model="apiKey"
+            @change="onApiKeyChange()"
+            placeholder="API Key (mop_xxx_xxx)"
+            class="px-3 py-1.5 text-sm border border-slate-300 rounded-lg focus:ring-2 focus:ring-primary focus:border-transparent outline-none w-48"
+          >
+          <button
+            @click="loadData()"
+            :disabled="loading || !apiKey"
+            class="px-3 py-1.5 bg-primary text-white rounded-lg text-sm font-medium hover:bg-indigo-600 transition disabled:opacity-50"
+          >
+            <span x-show="!loading">Connect</span>
+            <span x-show="loading">...</span>
+          </button>
+        </div>
+      </div>
+    </header>
+
+    <!-- Navigation -->
+    <nav class="bg-white border-b border-slate-200">
+      <div class="max-w-6xl mx-auto px-4">
+        <div class="flex gap-1">
+          <template x-for="tab in ['inbox', 'labels', 'integrations', 'settings']" :key="tab">
+            <button
+              @click="currentTab = tab"
+              :class="currentTab === tab ? 'border-primary text-primary' : 'border-transparent text-slate-500 hover:text-slate-700'"
+              class="px-4 py-3 text-sm font-medium border-b-2 capitalize transition"
+              x-text="tab"
+            ></button>
+          </template>
+        </div>
+      </div>
+    </nav>
+
+    <!-- Content -->
+    <main class="max-w-6xl mx-auto px-4 py-6">
+
+      <!-- Inbox Tab -->
+      <div x-show="currentTab === 'inbox'">
+        <div class="flex items-center justify-between mb-6">
+          <h2 class="text-lg font-semibold text-slate-800">Inbox</h2>
+          <div class="flex gap-2">
+            <select
+              x-model="labelFilter"
+              @change="loadEmails()"
+              class="px-3 py-2 border border-slate-300 rounded-lg text-sm"
+            >
+              <option value="">All Labels</option>
+              <template x-for="label in labels" :key="label.id">
+                <option :value="label.id" x-text="label.name"></option>
+              </template>
+            </select>
+            <button @click="loadEmails()" class="px-3 py-2 bg-slate-100 rounded-lg text-sm hover:bg-slate-200">
+              Refresh
+            </button>
+          </div>
+        </div>
+
+        <!-- Email List -->
+        <div class="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
+          <template x-if="emails.length === 0 && !apiKey">
+            <div class="p-8 text-center text-slate-400">
+              <p>Enter your API key above and click Connect to load emails.</p>
+            </div>
+          </template>
+          <template x-if="emails.length === 0 && apiKey">
+            <div class="p-8 text-center text-slate-400">
+              <p>No emails yet. Send an email to your AI mailbox to get started.</p>
+            </div>
+          </template>
+
+          <template x-for="email in emails" :key="email.id">
+            <div
+              @click="openEmail(email.id)"
+              class="p-4 border-b border-slate-100 hover:bg-slate-50 cursor-pointer transition"
+            >
+              <div class="flex items-start justify-between gap-4">
+                <div class="flex-1 min-w-0">
+                  <div class="flex items-center gap-2 mb-1">
+                    <span class="font-medium text-slate-800 truncate" x-text="email.from"></span>
+                    <span class="text-xs text-slate-400" x-text="formatDate(email.receivedAt)"></span>
+                  </div>
+                  <p class="text-sm text-slate-700 truncate" x-text="email.subject"></p>
+                  <p class="text-sm text-slate-400 truncate mt-1" x-text="email.preview"></p>
+                </div>
+                <div class="flex gap-1 flex-shrink-0">
+                  <template x-for="label in email.labels" :key="label">
+                    <span class="px-2 py-0.5 bg-indigo-100 text-indigo-700 text-xs rounded-full" x-text="label"></span>
+                  </template>
+                </div>
+              </div>
+            </div>
+          </template>
+        </div>
+
+        <!-- Email Detail Modal -->
+        <div
+          x-show="selectedEmail"
+          x-cloak
+          @click.self="selectedEmail = null"
+          class="fixed inset-0 bg-black/50 flex items-center justify-center p-4 z-50"
+        >
+          <div class="bg-white rounded-xl shadow-xl max-w-2xl w-full max-h-[80vh] overflow-hidden" @click.stop>
+            <div class="p-4 border-b border-slate-200 flex items-center justify-between">
+              <h3 class="font-semibold text-slate-800" x-text="selectedEmail?.email?.subject || selectedEmail?.subject"></h3>
+              <button @click="selectedEmail = null" class="text-slate-400 hover:text-slate-600">
+                <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path>
+                </svg>
+              </button>
+            </div>
+            <div class="p-4 overflow-y-auto max-h-[60vh]">
+              <div class="space-y-2 mb-4">
+                <p class="text-sm"><span class="text-slate-500">From:</span> <span x-text="selectedEmail?.email?.from || selectedEmail?.from"></span></p>
+                <p class="text-sm"><span class="text-slate-500">To:</span> <span x-text="selectedEmail?.email?.to || ''"></span></p>
+                <p class="text-sm"><span class="text-slate-500">Date:</span> <span x-text="formatDate(selectedEmail?.email?.receivedAt || selectedEmail?.receivedAt)"></span></p>
+                <div class="flex gap-1">
+                  <span class="text-sm text-slate-500">Labels:</span>
+                  <template x-for="label in selectedEmail?.labels || []" :key="label">
+                    <span class="px-2 py-0.5 bg-indigo-100 text-indigo-700 text-xs rounded-full" x-text="label"></span>
+                  </template>
+                </div>
+              </div>
+              <hr class="my-4">
+              <div class="whitespace-pre-wrap text-sm text-slate-700" x-text="selectedEmail?.email?.textBody || selectedEmail?.preview || ''"></div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Labels Tab -->
+      <div x-show="currentTab === 'labels'">
+        <div class="flex items-center justify-between mb-6">
+          <div>
+            <h2 class="text-lg font-semibold text-slate-800">Labels</h2>
+            <p class="text-sm text-slate-500">Define labels for Claude to categorize your emails. Changes only affect future emails.</p>
+          </div>
+          <button
+            @click="editingLabel = { id: '', name: '', description: '' }; showLabelModal = true"
+            class="px-4 py-2 bg-primary text-white rounded-lg text-sm font-medium hover:bg-indigo-600 transition"
+          >
+            Add Label
+          </button>
+        </div>
+
+        <div class="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
+          <template x-if="labels.length === 0 && !apiKey">
+            <div class="p-8 text-center text-slate-400">
+              <p>Enter your API key above and click Connect to load labels.</p>
+            </div>
+          </template>
+          <template x-if="labels.length === 0 && apiKey">
+            <div class="p-8 text-center text-slate-400">
+              <p>No labels defined yet. Add labels to help Claude categorize your emails.</p>
+            </div>
+          </template>
+
+          <template x-for="label in labels" :key="label.id">
+            <div class="p-4 border-b border-slate-100 flex items-center justify-between">
+              <div>
+                <div class="flex items-center gap-2">
+                  <span class="font-medium text-slate-800" x-text="label.name"></span>
+                  <span class="text-xs text-slate-400 font-mono" x-text="label.id"></span>
+                </div>
+                <p class="text-sm text-slate-500 mt-1" x-text="label.description"></p>
+              </div>
+              <div class="flex gap-2">
+                <button
+                  @click="editingLabel = {...label}; showLabelModal = true"
+                  class="px-3 py-1.5 text-sm text-slate-600 hover:bg-slate-100 rounded-lg transition"
+                >
+                  Edit
+                </button>
+                <button
+                  @click="deleteLabel(label.id)"
+                  x-show="label.id !== 'catch-all'"
+                  class="px-3 py-1.5 text-sm text-red-600 hover:bg-red-50 rounded-lg transition"
+                >
+                  Delete
+                </button>
+              </div>
+            </div>
+          </template>
+        </div>
+
+        <!-- Label Modal -->
+        <div
+          x-show="showLabelModal"
+          x-cloak
+          @click.self="showLabelModal = false"
+          class="fixed inset-0 bg-black/50 flex items-center justify-center p-4 z-50"
+        >
+          <div class="bg-white rounded-xl shadow-xl max-w-md w-full" @click.stop>
+            <div class="p-4 border-b border-slate-200">
+              <h3 class="font-semibold text-slate-800" x-text="editingLabel?.id ? 'Edit Label' : 'Add Label'"></h3>
+            </div>
+            <form @submit.prevent="saveLabel()" class="p-4 space-y-4">
+              <div>
+                <label class="block text-sm font-medium text-slate-700 mb-1">ID (lowercase, no spaces)</label>
+                <input
+                  type="text"
+                  x-model="editingLabel.id"
+                  :disabled="editingLabel?.id && labels.find(l => l.id === editingLabel.id)"
+                  placeholder="finance"
+                  pattern="[a-z0-9-]+"
+                  class="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-primary focus:border-transparent outline-none disabled:bg-slate-100"
+                >
+              </div>
+              <div>
+                <label class="block text-sm font-medium text-slate-700 mb-1">Display Name</label>
+                <input
+                  type="text"
+                  x-model="editingLabel.name"
+                  placeholder="Finance & Bills"
+                  class="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-primary focus:border-transparent outline-none"
+                >
+              </div>
+              <div>
+                <label class="block text-sm font-medium text-slate-700 mb-1">Description (for Claude)</label>
+                <textarea
+                  x-model="editingLabel.description"
+                  placeholder="Invoices, receipts, bank statements, and financial documents"
+                  rows="3"
+                  class="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-primary focus:border-transparent outline-none resize-none"
+                ></textarea>
+                <p class="text-xs text-slate-400 mt-1">This description helps Claude decide when to apply this label.</p>
+              </div>
+              <div class="flex justify-end gap-2 pt-2">
+                <button type="button" @click="showLabelModal = false" class="px-4 py-2 text-sm text-slate-600 hover:bg-slate-100 rounded-lg transition">
+                  Cancel
+                </button>
+                <button type="submit" class="px-4 py-2 text-sm bg-primary text-white rounded-lg font-medium hover:bg-indigo-600 transition">
+                  Save
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      </div>
+
+      <!-- Integrations Tab -->
+      <div x-show="currentTab === 'integrations'">
+        <h2 class="text-lg font-semibold text-slate-800 mb-2">Integrations</h2>
+        <p class="text-sm text-slate-500 mb-6">Connect your AI to access emails. All integrations pull emails on-demand with optional label filtering.</p>
+
+        <div class="space-y-4">
+          <!-- MCP Integration -->
+          <div class="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
+            <button
+              @click="expandedIntegration = expandedIntegration === 'mcp' ? null : 'mcp'"
+              class="w-full p-4 flex items-center justify-between hover:bg-slate-50 transition"
+            >
+              <div class="flex items-center gap-3">
+                <div class="w-10 h-10 bg-orange-100 rounded-lg flex items-center justify-center">
+                  <span class="text-orange-600 font-bold">C</span>
+                </div>
+                <div class="text-left">
+                  <h3 class="font-medium text-slate-800">Claude Desktop (MCP)</h3>
+                  <p class="text-sm text-slate-500">Model Context Protocol integration</p>
+                </div>
+              </div>
+              <svg :class="expandedIntegration === 'mcp' ? 'rotate-180' : ''" class="w-5 h-5 text-slate-400 transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"></path>
+              </svg>
+            </button>
+            <div x-show="expandedIntegration === 'mcp'" x-collapse class="border-t border-slate-200 p-4 bg-slate-50">
+              <p class="text-sm text-slate-600 mb-4">Add this configuration to your <code class="bg-slate-200 px-1 rounded">claude_desktop_config.json</code>:</p>
+              <pre class="bg-slate-800 text-slate-100 p-4 rounded-lg text-sm overflow-x-auto"><code x-text="getMCPConfig()"></code></pre>
+              <button @click="copyToClipboard(getMCPConfig())" class="mt-3 px-3 py-1.5 bg-slate-200 text-slate-700 rounded text-sm hover:bg-slate-300 transition">
+                Copy to Clipboard
+              </button>
+              <p class="text-xs text-slate-500 mt-4">Config file location: <code class="bg-slate-200 px-1 rounded">~/Library/Application Support/Claude/claude_desktop_config.json</code></p>
+            </div>
+          </div>
+
+          <!-- ChatGPT Integration -->
+          <div class="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
+            <button
+              @click="expandedIntegration = expandedIntegration === 'chatgpt' ? null : 'chatgpt'"
+              class="w-full p-4 flex items-center justify-between hover:bg-slate-50 transition"
+            >
+              <div class="flex items-center gap-3">
+                <div class="w-10 h-10 bg-green-100 rounded-lg flex items-center justify-center">
+                  <span class="text-green-600 font-bold">G</span>
+                </div>
+                <div class="text-left">
+                  <h3 class="font-medium text-slate-800">ChatGPT (Actions)</h3>
+                  <p class="text-sm text-slate-500">OpenAI GPT Actions integration</p>
+                </div>
+              </div>
+              <svg :class="expandedIntegration === 'chatgpt' ? 'rotate-180' : ''" class="w-5 h-5 text-slate-400 transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"></path>
+              </svg>
+            </button>
+            <div x-show="expandedIntegration === 'chatgpt'" x-collapse class="border-t border-slate-200 p-4 bg-slate-50">
+              <ol class="text-sm text-slate-600 space-y-3">
+                <li class="flex gap-2">
+                  <span class="font-medium text-primary">1.</span>
+                  <span>Go to ChatGPT → Create a GPT → Configure → Actions</span>
+                </li>
+                <li class="flex gap-2">
+                  <span class="font-medium text-primary">2.</span>
+                  <span>Click "Import from URL" and enter:</span>
+                </li>
+              </ol>
+              <div class="bg-slate-800 text-slate-100 p-3 rounded-lg text-sm mt-2 flex items-center justify-between">
+                <code x-text="apiBase + '/openapi.json'"></code>
+                <button @click="copyToClipboard(apiBase + '/openapi.json')" class="text-slate-400 hover:text-white">
+                  <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z"></path>
+                  </svg>
+                </button>
+              </div>
+              <ol start="3" class="text-sm text-slate-600 space-y-3 mt-3">
+                <li class="flex gap-2">
+                  <span class="font-medium text-primary">3.</span>
+                  <span>Set Authentication → API Key → Bearer</span>
+                </li>
+                <li class="flex gap-2">
+                  <span class="font-medium text-primary">4.</span>
+                  <span>Enter your API key:</span>
+                </li>
+              </ol>
+              <div class="bg-slate-800 text-slate-100 p-3 rounded-lg text-sm mt-2 flex items-center justify-between">
+                <code x-text="apiKey"></code>
+                <button @click="copyToClipboard(apiKey)" class="text-slate-400 hover:text-white">
+                  <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z"></path>
+                  </svg>
+                </button>
+              </div>
+            </div>
+          </div>
+
+          <!-- REST API Integration -->
+          <div class="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
+            <button
+              @click="expandedIntegration = expandedIntegration === 'api' ? null : 'api'"
+              class="w-full p-4 flex items-center justify-between hover:bg-slate-50 transition"
+            >
+              <div class="flex items-center gap-3">
+                <div class="w-10 h-10 bg-blue-100 rounded-lg flex items-center justify-center">
+                  <span class="text-blue-600 font-bold">{}</span>
+                </div>
+                <div class="text-left">
+                  <h3 class="font-medium text-slate-800">REST API</h3>
+                  <p class="text-sm text-slate-500">Direct API access for custom agents</p>
+                </div>
+              </div>
+              <svg :class="expandedIntegration === 'api' ? 'rotate-180' : ''" class="w-5 h-5 text-slate-400 transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"></path>
+              </svg>
+            </button>
+            <div x-show="expandedIntegration === 'api'" x-collapse class="border-t border-slate-200 p-4 bg-slate-50">
+              <p class="text-sm text-slate-600 mb-4">Base URL and authentication:</p>
+              <div class="space-y-3">
+                <div>
+                  <label class="text-xs text-slate-500">Base URL</label>
+                  <div class="bg-slate-800 text-slate-100 p-3 rounded-lg text-sm flex items-center justify-between">
+                    <code x-text="apiBase + '/api/v1'"></code>
+                    <button @click="copyToClipboard(apiBase + '/api/v1')" class="text-slate-400 hover:text-white">
+                      <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z"></path>
+                      </svg>
+                    </button>
+                  </div>
+                </div>
+                <div>
+                  <label class="text-xs text-slate-500">Authorization Header</label>
+                  <div class="bg-slate-800 text-slate-100 p-3 rounded-lg text-sm flex items-center justify-between">
+                    <code>Bearer <span x-text="apiKey"></span></code>
+                    <button @click="copyToClipboard('Bearer ' + apiKey)" class="text-slate-400 hover:text-white">
+                      <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z"></path>
+                      </svg>
+                    </button>
+                  </div>
+                </div>
+              </div>
+              <h4 class="font-medium text-slate-700 mt-6 mb-3">Endpoints</h4>
+              <div class="space-y-2 text-sm">
+                <div class="flex gap-2">
+                  <span class="px-2 py-0.5 bg-green-100 text-green-700 rounded text-xs font-mono">GET</span>
+                  <code class="text-slate-600">/api/v1/emails</code>
+                  <span class="text-slate-400">- List emails (with ?labels=x filter)</span>
+                </div>
+                <div class="flex gap-2">
+                  <span class="px-2 py-0.5 bg-green-100 text-green-700 rounded text-xs font-mono">GET</span>
+                  <code class="text-slate-600">/api/v1/emails/:id</code>
+                  <span class="text-slate-400">- Get email details</span>
+                </div>
+                <div class="flex gap-2">
+                  <span class="px-2 py-0.5 bg-green-100 text-green-700 rounded text-xs font-mono">GET</span>
+                  <code class="text-slate-600">/api/v1/labels</code>
+                  <span class="text-slate-400">- List labels</span>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Settings Tab -->
+      <div x-show="currentTab === 'settings'">
+        <h2 class="text-lg font-semibold text-slate-800 mb-6">Settings</h2>
+
+        <div class="space-y-6">
+          <!-- Mailbox -->
+          <div class="bg-white rounded-xl shadow-sm border border-slate-200 p-6">
+            <h3 class="font-medium text-slate-800 mb-4">Mailbox</h3>
+            <div class="flex items-center gap-2">
+              <div class="flex-1">
+                <label class="block text-sm text-slate-500 mb-1">Your AI's email address</label>
+                <div class="flex items-center">
+                  <input
+                    type="text"
+                    :value="tenant?.id || ''"
+                    disabled
+                    class="px-3 py-2 border border-slate-300 rounded-l-lg bg-slate-100 text-slate-700"
+                  >
+                  <span class="px-3 py-2 border border-l-0 border-slate-300 rounded-r-lg bg-slate-50 text-slate-500">@moperator.work</span>
+                </div>
+              </div>
+            </div>
+            <p class="text-xs text-slate-400 mt-2">Mailbox username cannot be changed once set.</p>
+          </div>
+
+          <!-- API Key -->
+          <div class="bg-white rounded-xl shadow-sm border border-slate-200 p-6">
+            <h3 class="font-medium text-slate-800 mb-4">API Key</h3>
+            <div>
+              <label class="block text-sm text-slate-500 mb-1">Your API key</label>
+              <div class="flex items-center gap-2">
+                <input
+                  :type="showApiKey ? 'text' : 'password'"
+                  :value="apiKey"
+                  disabled
+                  class="flex-1 px-3 py-2 border border-slate-300 rounded-lg bg-slate-100 font-mono text-sm"
+                >
+                <button @click="showApiKey = !showApiKey" class="px-3 py-2 border border-slate-300 rounded-lg hover:bg-slate-50">
+                  <span x-text="showApiKey ? 'Hide' : 'Show'"></span>
+                </button>
+                <button @click="copyToClipboard(apiKey)" class="px-3 py-2 border border-slate-300 rounded-lg hover:bg-slate-50">
+                  Copy
+                </button>
+              </div>
+            </div>
+          </div>
+
+          <!-- Reserved: Billing -->
+          <div class="bg-white rounded-xl shadow-sm border border-slate-200 p-6 opacity-50">
+            <h3 class="font-medium text-slate-800 mb-2">Billing</h3>
+            <p class="text-sm text-slate-500">Coming soon</p>
+          </div>
+
+          <!-- Reserved: Danger Zone -->
+          <div class="bg-white rounded-xl shadow-sm border border-red-200 p-6 opacity-50">
+            <h3 class="font-medium text-red-800 mb-2">Danger Zone</h3>
+            <p class="text-sm text-slate-500">Account deletion - Coming soon</p>
+          </div>
+        </div>
+      </div>
+
+    </main>
+  </div>
+
+  <!-- Toast Notification -->
+  <div
+    x-show="toast"
+    x-cloak
+    x-transition
+    class="fixed bottom-4 right-4 bg-slate-800 text-white px-4 py-2 rounded-lg shadow-lg text-sm"
+    x-text="toast"
+  ></div>
+
+  <script>
+    function app() {
+      return {
+        // State
+        apiKey: '',
+        apiBase: 'https://moperator.raullenchai.workers.dev',
+        tenant: null,
+        currentTab: 'inbox',
+        loading: false,
+        toast: '',
+
+        // Data
+        emails: [],
+        labels: [],
+        labelFilter: '',
+
+        // UI State
+        selectedEmail: null,
+        showLabelModal: false,
+        editingLabel: null,
+        expandedIntegration: null,
+        showApiKey: false,
+
+        async init() {
+          // Check for stored API key
+          const stored = localStorage.getItem('moperator_api_key');
+          if (stored) {
+            this.apiKey = stored;
+            await this.loadData();
+          }
+        },
+
+        onApiKeyChange() {
+          localStorage.setItem('moperator_api_key', this.apiKey);
+          // Extract tenant info from key (mop_<tenant>_xxx)
+          const parts = this.apiKey.split('_');
+          if (parts.length >= 2) {
+            this.tenant = { id: parts[1], email: `${parts[1]}@moperator.work` };
+          }
+        },
+
+        async loadData() {
+          if (!this.apiKey) {
+            this.showToast('Enter an API key first');
+            return;
+          }
+
+          this.loading = true;
+          this.onApiKeyChange();
+
+          try {
+            await this.loadLabels();
+            await this.loadEmails();
+            this.showToast('Connected');
+          } catch (err) {
+            this.showToast(err.message || 'Failed to connect');
+          } finally {
+            this.loading = false;
+          }
+        },
+
+
+        async loadEmails() {
+          try {
+            let url = `${this.apiBase}/api/v1/emails?limit=50`;
+            if (this.labelFilter) {
+              url += `&labels=${this.labelFilter}`;
+            }
+            const res = await fetch(url, {
+              headers: { 'Authorization': `Bearer ${this.apiKey}` }
+            });
+            const data = await res.json();
+            this.emails = data.emails || [];
+          } catch (err) {
+            console.error('Failed to load emails:', err);
+          }
+        },
+
+        async openEmail(emailId) {
+          try {
+            const res = await fetch(`${this.apiBase}/api/v1/emails/${emailId}`, {
+              headers: { 'Authorization': `Bearer ${this.apiKey}` }
+            });
+            if (!res.ok) throw new Error('Failed to load email');
+            const data = await res.json();
+            this.selectedEmail = data;
+          } catch (err) {
+            this.showToast('Failed to load email');
+          }
+        },
+
+        async loadLabels() {
+          try {
+            const res = await fetch(`${this.apiBase}/api/v1/labels`, {
+              headers: { 'Authorization': `Bearer ${this.apiKey}` }
+            });
+            const data = await res.json();
+            this.labels = data.labels || [];
+          } catch (err) {
+            console.error('Failed to load labels:', err);
+          }
+        },
+
+        async saveLabel() {
+          if (!this.editingLabel.id || !this.editingLabel.name || !this.editingLabel.description) {
+            this.showToast('Please fill in all fields');
+            return;
+          }
+
+          try {
+            const isNew = !this.labels.find(l => l.id === this.editingLabel.id);
+            const method = isNew ? 'POST' : 'PUT';
+            const url = isNew
+              ? `${this.apiBase}/api/v1/labels`
+              : `${this.apiBase}/api/v1/labels/${this.editingLabel.id}`;
+
+            const res = await fetch(url, {
+              method,
+              headers: {
+                'Authorization': `Bearer ${this.apiKey}`,
+                'Content-Type': 'application/json'
+              },
+              body: JSON.stringify(this.editingLabel)
+            });
+
+            if (!res.ok) {
+              const err = await res.json();
+              throw new Error(err.error || 'Failed to save label');
+            }
+
+            await this.loadLabels();
+            this.showLabelModal = false;
+            this.showToast('Label saved');
+          } catch (err) {
+            this.showToast(err.message);
+          }
+        },
+
+        async deleteLabel(id) {
+          if (!confirm('Delete this label? This will not affect existing emails.')) return;
+
+          try {
+            const res = await fetch(`${this.apiBase}/api/v1/labels/${id}`, {
+              method: 'DELETE',
+              headers: { 'Authorization': `Bearer ${this.apiKey}` }
+            });
+
+            if (!res.ok) throw new Error('Failed to delete');
+
+            await this.loadLabels();
+            this.showToast('Label deleted');
+          } catch (err) {
+            this.showToast(err.message);
+          }
+        },
+
+        getMCPConfig() {
+          return JSON.stringify({
+            "mcpServers": {
+              "moperator": {
+                "command": "npx",
+                "args": ["-y", "mcp-remote", this.apiBase + "/mcp", "--header", "Authorization: Bearer " + this.apiKey]
+              }
+            }
+          }, null, 2);
+        },
+
+        formatDate(dateStr) {
+          if (!dateStr) return '';
+          const date = new Date(dateStr);
+          const now = new Date();
+          const diff = now - date;
+
+          if (diff < 86400000) { // Less than 24 hours
+            return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+          } else if (diff < 604800000) { // Less than 7 days
+            return date.toLocaleDateString([], { weekday: 'short' });
+          } else {
+            return date.toLocaleDateString([], { month: 'short', day: 'numeric' });
+          }
+        },
+
+        copyToClipboard(text) {
+          navigator.clipboard.writeText(text);
+          this.showToast('Copied to clipboard');
+        },
+
+        showToast(message) {
+          this.toast = message;
+          setTimeout(() => this.toast = '', 3000);
+        }
+      };
+    }
+  </script>
+</body>
+</html>

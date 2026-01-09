@@ -74,6 +74,15 @@ export async function checkAgentHealth(
 ): Promise<HealthStatus> {
   const now = new Date().toISOString();
 
+  // If no webhook URL, skip health check and return healthy
+  if (!agent.webhookUrl) {
+    return {
+      healthy: true,
+      lastCheck: now,
+      consecutiveFailures: 0,
+    };
+  }
+
   // Get existing health status
   const existingData = await kv.get(`agent:${agent.id}`);
   const existingAgent = existingData

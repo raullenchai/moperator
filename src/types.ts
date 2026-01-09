@@ -11,12 +11,29 @@ export interface Env {
   ADMIN_SECRET?: string;       // Admin secret for tenant management
 }
 
-// Agent registered in KV
+// Label defined by tenant for email classification
+export interface Label {
+  id: string;           // "finance", "travel", etc. (alphanumeric + dash, max 50 chars)
+  name: string;         // "Finance & Bills" (display name, max 100 chars)
+  description: string;  // For Claude: "Invoices, receipts, bank statements" (max 500 chars)
+}
+
+// Default labels for new tenants
+export const DEFAULT_LABELS: Label[] = [
+  { id: "important", name: "Important", description: "Urgent, time-sensitive, or high-priority emails requiring immediate attention" },
+  { id: "catch-all", name: "Other", description: "Emails that don't fit other categories" },
+];
+
+// Maximum labels per tenant
+export const MAX_LABELS_PER_TENANT = 50;
+
+// Agent registered in KV - now subscribes to labels
 export interface Agent {
   id: string;
   name: string;
   description: string;
-  webhookUrl: string;
+  webhookUrl?: string;         // Optional - agent may not need webhook
+  labels: string[];            // Labels this agent subscribes to
   active: boolean;
 }
 
@@ -41,7 +58,8 @@ export interface Attachment {
 // Webhook payload sent to agents
 export interface WebhookPayload {
   email: ParsedEmail;
-  routedTo: string;
+  labels: string[];            // Labels assigned to this email
+  matchedLabel: string;        // Which label triggered this webhook
   routingReason: string;
   timestamp: string;
   signature: string;
@@ -57,33 +75,37 @@ export interface ClaudeResponse {
   content: Array<{ type: "text"; text: string }>;
 }
 
-// Routing decision from Claude
+// Labeling decision from Claude (replaces RoutingDecision)
+export interface LabelingDecision {
+  labels: string[];    // One or more labels assigned
+  reason: string;      // Explanation for the labeling
+}
+
+// Legacy: Routing decision (kept for backwards compatibility)
 export interface RoutingDecision {
   agentId: string;
   reason: string;
 }
 
-// Email history record
+// Email history record - now with labels
 export interface EmailRecord {
   id: string;
   email: ParsedEmail;
-  routingDecision: RoutingDecision;
-  dispatchResult: {
-    success: boolean;
-    statusCode?: number;
-    error?: string;
-  };
-  agentId: string;
+  labels: string[];                    // Labels assigned to this email
+  labelingDecision: LabelingDecision;  // Full decision from Claude
+  dispatchResults: DispatchResult[];   // Results for each agent notified
   processedAt: string;
   processingTimeMs: number;
 }
 
-// Retry queue item
+// Retry queue item - updated for label-based dispatch
 export interface RetryItem {
   id: string;
   email: ParsedEmail;
   agentId: string;
   webhookUrl: string;
+  labels: string[];           // Labels on the email
+  matchedLabel: string;       // Which label triggered this agent
   routingReason: string;
   attempts: number;
   maxAttempts: number;
@@ -95,6 +117,8 @@ export interface RetryItem {
 
 // Dispatch result with more details
 export interface DispatchResult {
+  agentId: string;
+  matchedLabel: string;     // Which label triggered this dispatch
   success: boolean;
   statusCode?: number;
   error?: string;

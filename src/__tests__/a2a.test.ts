@@ -52,9 +52,9 @@ const mockEmail1 = JSON.stringify({
     textBody: "This is the body of test email 1",
     receivedAt: "2024-01-15T10:00:00.000Z",
   },
-  agentId: "test-agent",
-  routingDecision: { agentId: "test-agent", reason: "Test routing" },
-  dispatchResult: { success: true, statusCode: 200 },
+  labels: ["finance", "important"],
+  labelingDecision: { labels: ["finance", "important"], reason: "Test labeling" },
+  dispatchResults: [{ agentId: "test-agent", matchedLabel: "finance", success: true, statusCode: 200 }],
   processedAt: "2024-01-15T10:00:01.000Z",
   processingTimeMs: 1000,
 });
@@ -67,9 +67,9 @@ const mockEmail2 = JSON.stringify({
     textBody: "This is the body of test email 2",
     receivedAt: "2024-01-15T11:00:00.000Z",
   },
-  agentId: "test-agent",
-  routingDecision: { agentId: "test-agent", reason: "Test routing" },
-  dispatchResult: { success: false, statusCode: 500, error: "Server error" },
+  labels: ["support"],
+  labelingDecision: { labels: ["support"], reason: "Support request" },
+  dispatchResults: [{ agentId: "test-agent", matchedLabel: "support", success: false, statusCode: 500, error: "Server error" }],
   processedAt: "2024-01-15T11:00:01.000Z",
   processingTimeMs: 2000,
 });
@@ -94,18 +94,19 @@ describe("A2A Protocol", () => {
 
       expect(card.name).toBe("Moperator Email Agent");
       expect(card.url).toBe("https://api.example.com");
-      expect(card.version).toBe("1.0.0");
+      expect(card.version).toBe("2.0.0");
       expect(card.authentication.type).toBe("bearer");
     });
 
     it("includes all capabilities", () => {
       const card = getAgentCard("https://api.example.com");
 
-      expect(card.capabilities).toHaveLength(4);
+      expect(card.capabilities).toHaveLength(5);
       expect(card.capabilities.map((c) => c.name)).toEqual([
         "check_inbox",
         "read_email",
         "search_emails",
+        "list_labels",
         "email_stats",
       ]);
     });
@@ -203,8 +204,8 @@ describe("A2A Protocol", () => {
 
       expect(task.status).toBe("completed");
       expect((task.output as any).total).toBe(2);
-      expect((task.output as any).successful).toBe(1);
-      expect((task.output as any).failed).toBe(1);
+      expect((task.output as any).byLabel).toBeDefined();
+      expect((task.output as any).avgProcessingTimeMs).toBeDefined();
     });
 
     it("fails for unknown capability", async () => {
@@ -254,7 +255,7 @@ describe("A2A Protocol", () => {
       expect(response.status).toBe(200);
       expect(response.headers.get("Content-Type")).toBe("application/json");
 
-      const body = await response.json();
+      const body = (await response.json()) as { name: string; url: string };
       expect(body.name).toBe("Moperator Email Agent");
       expect(body.url).toBe("https://api.example.com");
     });
@@ -264,8 +265,8 @@ describe("A2A Protocol", () => {
 
       expect(response.status).toBe(200);
 
-      const body = await response.json();
-      expect(body.capabilities).toHaveLength(4);
+      const body = (await response.json()) as { capabilities: unknown[] };
+      expect(body.capabilities).toHaveLength(5);
     });
 
     it("includes CORS headers", () => {

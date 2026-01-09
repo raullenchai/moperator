@@ -1,13 +1,25 @@
-import type { ParsedEmail, RoutingDecision, EmailRecord, DispatchResult } from "./types";
+/**
+ * Email History Storage
+ *
+ * Stores and retrieves email records with label information.
+ * Supports tenant-scoped operations and label-based filtering.
+ */
+
+import type { ParsedEmail, LabelingDecision, EmailRecord, DispatchResult } from "./types";
+import { tenantKey } from "./tenant";
 
 const MAX_HISTORY = 100;
 const HISTORY_TTL = 60 * 60 * 24 * 30; // 30 days
 
+/**
+ * Save an email record after processing
+ */
 export async function saveEmailRecord(
   kv: KVNamespace,
+  tenantId: string,
   email: ParsedEmail,
-  routingDecision: RoutingDecision,
-  dispatchResult: DispatchResult,
+  labelingDecision: LabelingDecision,
+  dispatchResults: DispatchResult[],
   processingTimeMs: number
 ): Promise<string> {
   const id = generateId();
@@ -16,37 +28,79 @@ export async function saveEmailRecord(
   const record: EmailRecord = {
     id,
     email,
-    routingDecision,
-    dispatchResult,
-    agentId: routingDecision.agentId,
+    labels: labelingDecision.labels,
+    labelingDecision,
+    dispatchResults,
     processedAt: now,
     processingTimeMs,
   };
 
   // Save the record
-  await kv.put(`email:${id}`, JSON.stringify(record), {
+  await kv.put(tenantKey(tenantId, "email", id), JSON.stringify(record), {
     expirationTtl: HISTORY_TTL,
   });
 
-  // Update the index (maintain order for recent emails)
-  await addToIndex(kv, id);
+  // Update the main index (maintain order for recent emails)
+  await addToIndex(kv, tenantId, id);
 
-  console.log(`[HISTORY] Saved email ${id}`);
+  // Update label indexes for efficient filtering
+  for (const label of labelingDecision.labels) {
+    await addToLabelIndex(kv, tenantId, label, id);
+  }
+
+  console.log(`[HISTORY] Saved email ${id} with labels: ${labelingDecision.labels.join(", ")}`);
   return id;
 }
 
-export async function getEmailRecord(kv: KVNamespace, id: string): Promise<EmailRecord | null> {
-  const data = await kv.get(`email:${id}`);
+/**
+ * Get a specific email record by ID
+ */
+export async function getEmailRecord(
+  kv: KVNamespace,
+  tenantId: string,
+  id: string
+): Promise<EmailRecord | null> {
+  const data = await kv.get(tenantKey(tenantId, "email", id));
   if (!data) return null;
   return JSON.parse(data) as EmailRecord;
 }
 
+/**
+ * Get recent emails with optional label filtering
+ */
 export async function getRecentEmails(
   kv: KVNamespace,
+  tenantId: string,
   limit: number = 20,
-  offset: number = 0
+  offset: number = 0,
+  labelFilter?: string[]
 ): Promise<{ emails: EmailRecord[]; total: number }> {
-  const index = await getIndex(kv);
+  // If filtering by labels, use label indexes
+  if (labelFilter && labelFilter.length > 0) {
+    const emailIds = new Set<string>();
+
+    for (const label of labelFilter) {
+      const labelIndex = await getLabelIndex(kv, tenantId, label);
+      for (const id of labelIndex) {
+        emailIds.add(id);
+      }
+    }
+
+    const allIds = Array.from(emailIds);
+    const total = allIds.length;
+    const ids = allIds.slice(offset, offset + limit);
+
+    const emails: EmailRecord[] = [];
+    for (const emailId of ids) {
+      const record = await getEmailRecord(kv, tenantId, emailId);
+      if (record) emails.push(record);
+    }
+
+    return { emails, total };
+  }
+
+  // Otherwise use main index
+  const index = await getIndex(kv, tenantId);
   const total = index.length;
 
   // Get IDs for the requested page (newest first)
@@ -55,7 +109,7 @@ export async function getRecentEmails(
   // Fetch all records
   const emails: EmailRecord[] = [];
   for (const id of ids) {
-    const record = await getEmailRecord(kv, id);
+    const record = await getEmailRecord(kv, tenantId, id);
     if (record) {
       emails.push(record);
     }
@@ -64,46 +118,85 @@ export async function getRecentEmails(
   return { emails, total };
 }
 
+/**
+ * Get emails by dispatch success status
+ */
 export async function getEmailsByStatus(
   kv: KVNamespace,
+  tenantId: string,
   success: boolean
 ): Promise<EmailRecord[]> {
-  const { emails } = await getRecentEmails(kv, MAX_HISTORY);
-  return emails.filter((e) => e.dispatchResult.success === success);
+  const { emails } = await getRecentEmails(kv, tenantId, MAX_HISTORY);
+  return emails.filter((e) => {
+    // Check if any dispatch was successful/failed
+    if (success) {
+      return e.dispatchResults.some((r) => r.success);
+    } else {
+      return e.dispatchResults.some((r) => !r.success);
+    }
+  });
 }
 
-export async function getEmailStats(kv: KVNamespace): Promise<{
+/**
+ * Get email statistics
+ */
+export async function getEmailStats(
+  kv: KVNamespace,
+  tenantId: string
+): Promise<{
   total: number;
+  byLabel: Record<string, number>;
   successful: number;
   failed: number;
   avgProcessingTimeMs: number;
 }> {
-  const { emails, total } = await getRecentEmails(kv, MAX_HISTORY);
+  const { emails, total } = await getRecentEmails(kv, tenantId, MAX_HISTORY);
 
-  const successful = emails.filter((e) => e.dispatchResult.success).length;
-  const failed = emails.filter((e) => !e.dispatchResult.success).length;
+  const byLabel: Record<string, number> = {};
+  let successfulCount = 0;
+  let failedCount = 0;
+  let totalProcessingTime = 0;
+
+  for (const email of emails) {
+    totalProcessingTime += email.processingTimeMs;
+
+    // Count by label
+    for (const label of email.labels) {
+      byLabel[label] = (byLabel[label] || 0) + 1;
+    }
+
+    // Count dispatch outcomes
+    const hasSuccess = email.dispatchResults.some((r) => r.success);
+    const hasFailed = email.dispatchResults.some((r) => !r.success);
+    if (hasSuccess) successfulCount++;
+    if (hasFailed) failedCount++;
+  }
+
   const avgProcessingTimeMs =
-    emails.length > 0
-      ? emails.reduce((sum, e) => sum + e.processingTimeMs, 0) / emails.length
-      : 0;
+    emails.length > 0 ? Math.round(totalProcessingTime / emails.length) : 0;
 
   return {
     total,
-    successful,
-    failed,
-    avgProcessingTimeMs: Math.round(avgProcessingTimeMs),
+    byLabel,
+    successful: successfulCount,
+    failed: failedCount,
+    avgProcessingTimeMs,
   };
 }
 
+/**
+ * Search emails by sender, subject, or labels
+ */
 export async function searchEmails(
   kv: KVNamespace,
+  tenantId: string,
   query: {
     from?: string;
     subject?: string;
-    agentId?: string;
+    labels?: string[];
   }
 ): Promise<EmailRecord[]> {
-  const { emails } = await getRecentEmails(kv, MAX_HISTORY);
+  const { emails } = await getRecentEmails(kv, tenantId, MAX_HISTORY, 0, query.labels);
 
   return emails.filter((record) => {
     if (query.from && !record.email.from.toLowerCase().includes(query.from.toLowerCase())) {
@@ -112,21 +205,20 @@ export async function searchEmails(
     if (query.subject && !record.email.subject.toLowerCase().includes(query.subject.toLowerCase())) {
       return false;
     }
-    if (query.agentId && record.agentId !== query.agentId) {
-      return false;
-    }
     return true;
   });
 }
 
-async function getIndex(kv: KVNamespace): Promise<string[]> {
-  const data = await kv.get("email:index");
+// ==================== Index Management ====================
+
+async function getIndex(kv: KVNamespace, tenantId: string): Promise<string[]> {
+  const data = await kv.get(tenantKey(tenantId, "email:index"));
   if (!data) return [];
   return JSON.parse(data) as string[];
 }
 
-async function addToIndex(kv: KVNamespace, id: string): Promise<void> {
-  const index = await getIndex(kv);
+async function addToIndex(kv: KVNamespace, tenantId: string, id: string): Promise<void> {
+  const index = await getIndex(kv, tenantId);
 
   // Add new ID at the beginning (newest first)
   index.unshift(id);
@@ -134,7 +226,25 @@ async function addToIndex(kv: KVNamespace, id: string): Promise<void> {
   // Trim to max size
   const trimmed = index.slice(0, MAX_HISTORY);
 
-  await kv.put("email:index", JSON.stringify(trimmed));
+  await kv.put(tenantKey(tenantId, "email:index"), JSON.stringify(trimmed));
+}
+
+async function getLabelIndex(kv: KVNamespace, tenantId: string, label: string): Promise<string[]> {
+  const data = await kv.get(tenantKey(tenantId, "label", label, "emails"));
+  if (!data) return [];
+  return JSON.parse(data) as string[];
+}
+
+async function addToLabelIndex(kv: KVNamespace, tenantId: string, label: string, emailId: string): Promise<void> {
+  const index = await getLabelIndex(kv, tenantId, label);
+
+  // Add new ID at the beginning (newest first)
+  index.unshift(emailId);
+
+  // Trim to max size
+  const trimmed = index.slice(0, MAX_HISTORY);
+
+  await kv.put(tenantKey(tenantId, "label", label, "emails"), JSON.stringify(trimmed));
 }
 
 function generateId(): string {

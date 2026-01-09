@@ -253,7 +253,8 @@ export async function resetDailyUsage(kv: KVNamespace): Promise<number> {
   let count = 0;
 
   for (const key of list.keys) {
-    if (!key.name.startsWith("tenant:") || key.name.includes(":")) continue;
+    // Skip index keys like "tenant:email:xxx" or "tenant:apikey:xxx"
+    if (!key.name.startsWith("tenant:") || key.name.slice(7).includes(":")) continue;
 
     const data = await kv.get(key.name);
     if (!data) continue;
@@ -318,12 +319,10 @@ export async function deleteTenant(
 
 /**
  * Generate tenant-scoped KV key
+ * Supports variadic segments: tenantKey("user1", "email", "123") -> "user:user1:email:123"
  */
-export function tenantKey(tenantId: string, type: string, id?: string): string {
-  if (id) {
-    return `user:${tenantId}:${type}:${id}`;
-  }
-  return `user:${tenantId}:${type}`;
+export function tenantKey(tenantId: string, ...segments: string[]): string {
+  return `user:${tenantId}:${segments.join(":")}`;
 }
 
 /**
