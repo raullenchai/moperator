@@ -33,15 +33,6 @@
 
       <form @submit.prevent="authenticate()" class="space-y-4">
         <div>
-          <label class="block text-sm font-medium text-slate-300 mb-1">API Endpoint</label>
-          <input
-            type="text"
-            x-model="apiEndpoint"
-            placeholder="https://api.moperator.work"
-            class="w-full px-4 py-2 bg-slate-700 border border-slate-600 rounded-lg focus:ring-2 focus:ring-primary focus:border-transparent outline-none text-white"
-          >
-        </div>
-        <div>
           <label class="block text-sm font-medium text-slate-300 mb-1">Admin Secret</label>
           <input
             type="password"
@@ -201,16 +192,14 @@
         isAuthenticated: false,
         loading: false,
         error: '',
-        apiEndpoint: localStorage.getItem('adminApiEndpoint') || 'https://api.moperator.work',
+        apiEndpoint: 'https://api.moperator.work',
         adminSecret: '',
         stats: null,
 
         async init() {
           const savedSecret = sessionStorage.getItem('adminSecret');
-          const savedEndpoint = localStorage.getItem('adminApiEndpoint');
-          if (savedSecret && savedEndpoint) {
+          if (savedSecret) {
             this.adminSecret = savedSecret;
-            this.apiEndpoint = savedEndpoint;
             this.isAuthenticated = true;
             await this.loadStats();
           }
@@ -234,7 +223,6 @@
             this.stats = await response.json();
             this.isAuthenticated = true;
             sessionStorage.setItem('adminSecret', this.adminSecret);
-            localStorage.setItem('adminApiEndpoint', this.apiEndpoint);
           } catch (err) {
             this.error = err.message || 'Authentication failed';
           } finally {
