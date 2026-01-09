@@ -32,6 +32,12 @@ id = "c17b49885c324cefaf005ddfdf1094b6"
 [triggers]
 crons = ["*/5 * * * *"]
 
+# Custom domain - set up in Cloudflare dashboard:
+# 1. Go to Workers & Pages > moperator > Settings > Domains
+# 2. Click "Add Custom Domain"
+# 3. Enter: api.moperator.work
+# 4. Cloudflare will auto-create DNS record
+
 # Secrets (set via wrangler secret put):
 # - ANTHROPIC_API_KEY: Claude API key
 # - WEBHOOK_SIGNING_KEY: HMAC signing key for webhook payloads
