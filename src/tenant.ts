@@ -7,6 +7,8 @@ export interface Tenant {
   id: string;
   name: string;
   email: string; // Primary email for receiving
+  loginEmail?: string; // Email used for login (e.g., owen@gmail.com)
+  passwordHash?: string; // Hashed password for login
   apiKey: string; // Hashed API key
   apiKeyPrefix: string; // First 8 chars for identification
   createdAt: string;
@@ -347,4 +349,161 @@ function generateRandomString(length: number): string {
   return Array.from(randomValues)
     .map((v) => chars[v % chars.length])
     .join("");
+}
+
+// ==================== Auth (Signup/Login) ====================
+
+/**
+ * Hash a password for storage
+ */
+export async function hashPassword(password: string): Promise<string> {
+  const encoder = new TextEncoder();
+  // Add a simple salt based on password length for basic security
+  const salted = `moperator_${password}_${password.length}`;
+  const data = encoder.encode(salted);
+  const hashBuffer = await crypto.subtle.digest("SHA-256", data);
+  const hashArray = Array.from(new Uint8Array(hashBuffer));
+  return hashArray.map((b) => b.toString(16).padStart(2, "0")).join("");
+}
+
+/**
+ * Verify a password against stored hash
+ */
+export async function verifyPassword(password: string, hash: string): Promise<boolean> {
+  const computed = await hashPassword(password);
+  return computed === hash;
+}
+
+/**
+ * Generate a tenant ID from email (sanitized)
+ */
+function generateTenantId(email: string): string {
+  // Use the part before @ and sanitize
+  const localPart = email.split("@")[0].toLowerCase();
+  // Remove special characters, keep only alphanumeric and dash
+  const sanitized = localPart.replace(/[^a-z0-9-]/g, "");
+  // Add random suffix to ensure uniqueness
+  const suffix = generateRandomString(6).toLowerCase();
+  return `${sanitized}-${suffix}`;
+}
+
+/**
+ * Signup a new user with email and password
+ */
+export async function signupTenant(
+  kv: KVNamespace,
+  input: { email: string; password: string; name?: string }
+): Promise<{ tenant: Tenant; apiKey: string }> {
+  const loginEmail = input.email.toLowerCase();
+
+  // Check if login email is already registered
+  const existingLogin = await kv.get(`tenant:login:${loginEmail}`);
+  if (existingLogin) {
+    throw new Error("Email already registered");
+  }
+
+  // Generate tenant ID from email
+  const tenantId = generateTenantId(loginEmail);
+
+  // Generate API key and hash password
+  const apiKey = generateApiKey(tenantId);
+  const hashedKey = await hashApiKey(apiKey);
+  const passwordHash = await hashPassword(input.password);
+
+  // Default inbox email (can be customized later)
+  const inboxEmail = `${tenantId}@moperator.work`;
+
+  const tenant: Tenant = {
+    id: tenantId,
+    name: input.name || loginEmail.split("@")[0],
+    email: inboxEmail,
+    loginEmail: loginEmail,
+    passwordHash: passwordHash,
+    apiKey: hashedKey,
+    apiKeyPrefix: getApiKeyPrefix(apiKey),
+    createdAt: new Date().toISOString(),
+    settings: { ...DEFAULT_SETTINGS },
+    usage: {
+      emailsToday: 0,
+      emailsTotal: 0,
+      agentCount: 0,
+    },
+  };
+
+  // Store tenant
+  await kv.put(`tenant:${tenantId}`, JSON.stringify(tenant));
+
+  // Index by login email
+  await kv.put(`tenant:login:${loginEmail}`, tenantId);
+
+  // Index by inbox email for routing
+  await kv.put(`tenant:email:${inboxEmail}`, tenantId);
+
+  // Index by API key hash for auth
+  await kv.put(`tenant:apikey:${hashedKey}`, tenantId);
+
+  console.log(`[TENANT] Signup: ${tenantId} (${loginEmail})`);
+
+  return { tenant, apiKey };
+}
+
+/**
+ * Login with email and password, returns API key
+ */
+export async function loginTenant(
+  kv: KVNamespace,
+  email: string,
+  password: string
+): Promise<{ tenant: Tenant; apiKey: string } | null> {
+  const loginEmail = email.toLowerCase();
+
+  // Find tenant by login email
+  const tenantId = await kv.get(`tenant:login:${loginEmail}`);
+  if (!tenantId) {
+    return null;
+  }
+
+  const tenant = await getTenant(kv, tenantId);
+  if (!tenant || !tenant.passwordHash) {
+    return null;
+  }
+
+  // Verify password
+  const valid = await verifyPassword(password, tenant.passwordHash);
+  if (!valid) {
+    return null;
+  }
+
+  // Generate new API key on login (rotate for security)
+  const newApiKey = generateApiKey(tenantId);
+  const hashedKey = await hashApiKey(newApiKey);
+
+  // Delete old API key index
+  await kv.delete(`tenant:apikey:${tenant.apiKey}`);
+
+  // Update tenant with new API key
+  tenant.apiKey = hashedKey;
+  tenant.apiKeyPrefix = getApiKeyPrefix(newApiKey);
+
+  await kv.put(`tenant:${tenantId}`, JSON.stringify(tenant));
+  await kv.put(`tenant:apikey:${hashedKey}`, tenantId);
+
+  console.log(`[TENANT] Login: ${tenantId}`);
+
+  return { tenant, apiKey: newApiKey };
+}
+
+/**
+ * Get tenant by login email
+ */
+export async function getTenantByLoginEmail(
+  kv: KVNamespace,
+  email: string
+): Promise<Tenant | null> {
+  const loginEmail = email.toLowerCase();
+  const tenantId = await kv.get(`tenant:login:${loginEmail}`);
+  if (!tenantId) {
+    return null;
+  }
+  return getTenant(kv, tenantId);
 }

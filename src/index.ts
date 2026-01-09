@@ -39,6 +39,8 @@ import {
   incrementUsage,
   resetDailyUsage,
   tenantKey,
+  signupTenant,
+  loginTenant,
   type Tenant,
 } from "./tenant";
 
@@ -218,6 +220,71 @@ export default {
       return handleCapabilitiesRequest();
     }
 
+    // ================== AUTH ENDPOINTS (Public) ==================
+
+    if (url.pathname === "/auth/signup" && request.method === "POST") {
+      try {
+        const body = await request.json() as { email?: string; password?: string; name?: string };
+
+        if (!body.email || !body.password) {
+          return json({ error: "Email and password are required" }, 400);
+        }
+
+        if (body.password.length < 6) {
+          return json({ error: "Password must be at least 6 characters" }, 400);
+        }
+
+        const result = await signupTenant(env.TENANTS, {
+          email: body.email,
+          password: body.password,
+          name: body.name,
+        });
+
+        return json({
+          success: true,
+          tenant: {
+            id: result.tenant.id,
+            name: result.tenant.name,
+            email: result.tenant.email,
+            inboxEmail: result.tenant.email,
+          },
+          apiKey: result.apiKey,
+        }, 201);
+      } catch (err) {
+        const message = err instanceof Error ? err.message : "Signup failed";
+        return json({ error: message }, 400);
+      }
+    }
+
+    if (url.pathname === "/auth/login" && request.method === "POST") {
+      try {
+        const body = await request.json() as { email?: string; password?: string };
+
+        if (!body.email || !body.password) {
+          return json({ error: "Email and password are required" }, 400);
+        }
+
+        const result = await loginTenant(env.TENANTS, body.email, body.password);
+
+        if (!result) {
+          return json({ error: "Invalid email or password" }, 401);
+        }
+
+        return json({
+          success: true,
+          tenant: {
+            id: result.tenant.id,
+            name: result.tenant.name,
+            email: result.tenant.email,
+            inboxEmail: result.tenant.email,
+          },
+          apiKey: result.apiKey,
+        });
+      } catch (err) {
+        return json({ error: "Login failed" }, 500);
+      }
+    }
+
     // ================== ADMIN ENDPOINTS ==================
 
     if (url.pathname.startsWith("/admin/")) {
@@ -343,6 +410,11 @@ async function handleTenantEndpoints(
       return json({ error: "Missing required fields: id, name, description" }, 400);
     }
 
+    // Validate label ID: lowercase letters only (a-z), no numbers, no special chars
+    if (!/^[a-z]+$/.test(body.id)) {
+      return json({ error: "Label ID must contain only lowercase letters (a-z)" }, 400);
+    }
+
     try {
       const label = await createTenantLabel(env.AGENT_REGISTRY, tenant.id, body as Label);
       return json({ label }, 201);
@@ -352,7 +424,7 @@ async function handleTenantEndpoints(
   }
 
   // Update label
-  if (url.pathname.match(/^\/api\/v1\/labels\/[\w-]+$/) && request.method === "PUT") {
+  if (url.pathname.match(/^\/api\/v1\/labels\/[a-z]+$/) && request.method === "PUT") {
     const labelId = url.pathname.split("/")[4];
     let body: Partial<Omit<Label, "id">>;
     try {
@@ -373,7 +445,7 @@ async function handleTenantEndpoints(
   }
 
   // Delete label
-  if (url.pathname.match(/^\/api\/v1\/labels\/[\w-]+$/) && request.method === "DELETE") {
+  if (url.pathname.match(/^\/api\/v1\/labels\/[a-z]+$/) && request.method === "DELETE") {
     const labelId = url.pathname.split("/")[4];
     try {
       const deleted = await deleteTenantLabel(env.AGENT_REGISTRY, tenant.id, labelId);
@@ -411,8 +483,8 @@ async function handleTenantEndpoints(
       return json({ error: "Missing required fields: id, name, description" }, 400);
     }
 
-    if (!/^[a-zA-Z0-9_-]+$/.test(body.id)) {
-      return json({ error: "Invalid agent ID format" }, 400);
+    if (!/^[a-z]+$/.test(body.id)) {
+      return json({ error: "Agent ID must contain only lowercase letters (a-z)" }, 400);
     }
 
     if (!body.labels || !Array.isArray(body.labels) || body.labels.length === 0) {
@@ -451,7 +523,7 @@ async function handleTenantEndpoints(
   }
 
   // Update agent
-  if (url.pathname.match(/^\/api\/v1\/agents\/[\w-]+$/) && request.method === "PUT") {
+  if (url.pathname.match(/^\/api\/v1\/agents\/[a-z]+$/) && request.method === "PUT") {
     const agentId = url.pathname.split("/")[4];
     const key = tenantKey(tenant.id, "agent", agentId);
     const existing = await env.AGENT_REGISTRY.get(key);
@@ -488,9 +560,9 @@ async function handleTenantEndpoints(
   }
 
   // Delete agent
-  if (url.pathname.match(/^\/api\/v1\/agents\/[\w-]+$/) && request.method === "DELETE") {
+  if (url.pathname.match(/^\/api\/v1\/agents\/[a-z]+$/) && request.method === "DELETE") {
     const agentId = url.pathname.split("/")[4];
-    if (!agentId || !/^[a-zA-Z0-9_-]+$/.test(agentId)) {
+    if (!agentId || !/^[a-z]+$/.test(agentId)) {
       return json({ error: "Invalid agent ID" }, 400);
     }
 
