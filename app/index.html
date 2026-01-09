@@ -695,30 +695,54 @@
           <button @click="copyToClipboard(viewingIntegration?.apiKey)" class="mt-2 px-3 py-1.5 bg-slate-200 rounded text-sm">Copy</button>
         </div>
 
-        <template x-if="viewingIntegration?.mcp">
-          <div>
-            <div class="text-sm font-medium text-slate-700 mb-1">MCP Config (Claude Desktop)</div>
-            <div class="bg-slate-900 text-slate-100 rounded-lg p-3 font-mono text-xs overflow-x-auto">
-              <pre x-text="getIntegrationMCPConfig(viewingIntegration)"></pre>
-            </div>
-            <button @click="copyToClipboard(getIntegrationMCPConfig(viewingIntegration))" class="mt-2 px-3 py-1.5 bg-slate-200 rounded text-sm">Copy</button>
+        <!-- MCP Config -->
+        <div>
+          <div class="flex items-center gap-2 mb-1">
+            <span class="text-sm font-medium text-slate-700">MCP Config (Claude Desktop)</span>
+            <span x-show="viewingIntegration?.mcp" class="px-1.5 py-0.5 bg-green-100 text-green-700 text-xs rounded">Enabled</span>
+            <span x-show="!viewingIntegration?.mcp" class="px-1.5 py-0.5 bg-slate-100 text-slate-500 text-xs rounded">Not enabled</span>
           </div>
-        </template>
+          <div class="bg-slate-900 text-slate-100 rounded-lg p-3 font-mono text-xs overflow-x-auto">
+            <pre x-text="getIntegrationMCPConfig(viewingIntegration)"></pre>
+          </div>
+          <button @click="copyToClipboard(getIntegrationMCPConfig(viewingIntegration))" class="mt-2 px-3 py-1.5 bg-slate-200 rounded text-sm">Copy</button>
+        </div>
 
-        <template x-if="viewingIntegration?.openapi">
-          <div>
-            <div class="text-sm font-medium text-slate-700 mb-1">OpenAPI URL (ChatGPT)</div>
-            <div class="bg-slate-100 rounded-lg p-3 font-mono text-sm break-all" x-text="apiBase + '/openapi.json'"></div>
-            <p class="text-xs text-slate-500 mt-1">Use the scoped API key above for authentication</p>
+        <!-- OpenAPI Config -->
+        <div>
+          <div class="flex items-center gap-2 mb-1">
+            <span class="text-sm font-medium text-slate-700">OpenAPI (ChatGPT Actions)</span>
+            <span x-show="viewingIntegration?.openapi" class="px-1.5 py-0.5 bg-green-100 text-green-700 text-xs rounded">Enabled</span>
+            <span x-show="!viewingIntegration?.openapi" class="px-1.5 py-0.5 bg-slate-100 text-slate-500 text-xs rounded">Not enabled</span>
           </div>
-        </template>
+          <div class="bg-slate-100 rounded-lg p-3 font-mono text-sm break-all" x-text="apiBase + '/openapi.json'"></div>
+          <p class="text-xs text-slate-500 mt-1">Import this URL in ChatGPT Actions, use the scoped API key for Bearer auth</p>
+          <button @click="copyToClipboard(apiBase + '/openapi.json')" class="mt-2 px-3 py-1.5 bg-slate-200 rounded text-sm">Copy URL</button>
+        </div>
 
-        <template x-if="viewingIntegration?.webhook">
-          <div>
-            <div class="text-sm font-medium text-slate-700 mb-1">Webhook URL</div>
-            <div class="bg-slate-100 rounded-lg p-3 font-mono text-sm break-all" x-text="viewingIntegration?.webhookUrl || 'Not configured'"></div>
+        <!-- Webhook Config -->
+        <div>
+          <div class="flex items-center gap-2 mb-1">
+            <span class="text-sm font-medium text-slate-700">Webhook</span>
+            <span x-show="viewingIntegration?.webhook" class="px-1.5 py-0.5 bg-green-100 text-green-700 text-xs rounded">Enabled</span>
+            <span x-show="!viewingIntegration?.webhook" class="px-1.5 py-0.5 bg-slate-100 text-slate-500 text-xs rounded">Not enabled</span>
           </div>
-        </template>
+          <div class="bg-slate-100 rounded-lg p-3 font-mono text-sm break-all" x-text="viewingIntegration?.webhookUrl || 'No webhook URL configured'"></div>
+          <p class="text-xs text-slate-500 mt-1">Emails matching subscribed labels will POST to this URL</p>
+        </div>
+
+        <!-- REST API -->
+        <div>
+          <div class="flex items-center gap-2 mb-1">
+            <span class="text-sm font-medium text-slate-700">REST API</span>
+            <span x-show="viewingIntegration?.api" class="px-1.5 py-0.5 bg-green-100 text-green-700 text-xs rounded">Enabled</span>
+            <span x-show="!viewingIntegration?.api" class="px-1.5 py-0.5 bg-slate-100 text-slate-500 text-xs rounded">Not enabled</span>
+          </div>
+          <div class="bg-slate-50 rounded-lg p-3 font-mono text-xs">
+            <div class="text-slate-500">curl -H "Authorization: Bearer <span class="text-slate-800" x-text="viewingIntegration?.apiKey?.slice(0,20) + '...'"></span>" \</div>
+            <div class="text-slate-800" x-text="apiBase + '/api/v1/emails'"></div>
+          </div>
+        </div>
 
         <div>
           <div class="text-sm font-medium text-slate-700 mb-1">Labels (Scope)</div>
