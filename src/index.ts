@@ -833,6 +833,66 @@ async function handleAdminEndpoints(request: Request, env: Env, url: URL): Promi
     return json({ deleted: tenantId });
   }
 
+  // Admin stats endpoint
+  if (url.pathname === "/admin/stats" && request.method === "GET") {
+    const tenants = await listTenants(env.TENANTS);
+
+    // Aggregate stats
+    const now = new Date();
+    const today = now.toISOString().split('T')[0];
+
+    let totalEmailsToday = 0;
+    let totalEmailsAllTime = 0;
+    let activeToday = 0;
+    let activeLast7Days = 0;
+    let activeLast30Days = 0;
+
+    const tenantStats = tenants.map(t => {
+      totalEmailsToday += t.usage.emailsToday;
+      totalEmailsAllTime += t.usage.emailsTotal;
+
+      if (t.usage.lastEmailAt) {
+        const lastEmail = new Date(t.usage.lastEmailAt);
+        const daysSinceLastEmail = Math.floor((now.getTime() - lastEmail.getTime()) / (1000 * 60 * 60 * 24));
+        if (daysSinceLastEmail === 0) activeToday++;
+        if (daysSinceLastEmail <= 7) activeLast7Days++;
+        if (daysSinceLastEmail <= 30) activeLast30Days++;
+      }
+
+      return {
+        id: t.id,
+        name: t.name,
+        email: t.email,
+        createdAt: t.createdAt,
+        emailsToday: t.usage.emailsToday,
+        emailsTotal: t.usage.emailsTotal,
+        lastEmailAt: t.usage.lastEmailAt,
+        agentCount: t.usage.agentCount,
+      };
+    });
+
+    // Sort by most active
+    tenantStats.sort((a, b) => b.emailsTotal - a.emailsTotal);
+
+    // Get queue stats
+    const queueStats = await getQueueStats(env.RETRY_QUEUE);
+
+    return json({
+      summary: {
+        totalTenants: tenants.length,
+        totalEmailsToday,
+        totalEmailsAllTime,
+        activeToday,
+        activeLast7Days,
+        activeLast30Days,
+        retryQueueSize: queueStats.pending,
+        deadLetterCount: queueStats.deadLetter,
+      },
+      tenants: tenantStats,
+      generatedAt: now.toISOString(),
+    });
+  }
+
   return json({ error: "Admin endpoint not found" }, 404);
 }
 
